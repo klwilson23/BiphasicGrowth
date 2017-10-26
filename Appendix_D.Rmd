@@ -1,0 +1,305 @@
+---
+title: |
+  | Appendix D:
+  | Fitting the Lester biphasic growth model without maturity data using a profile likelihood approach
+author: |
+  | Andrew Honsey$^1$ and Kyle Wilson$^2$
+  | $^1$University of Minnesota
+  | $^2$The University of Calgary
+date: "October 5, 2017"
+output:
+  html_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_D_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+  pdf_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_D_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+fig_height: 6
+fig_width: 7
+fontsize: 11pt
+geometry: margin=1in
+highlight: tango
+fig_caption: yes
+references:
+- DOI: null
+  URL: null
+  author:
+  - family: Wilson
+    given: K. L.
+  - family: Honsey
+    given: A.
+  - family: Moe
+    given: B.
+  - family: Venturelli
+    given: P.
+  container-title: Methods in Ecology and Evolution
+  id: WilsonInReview
+  issue: null
+  issued: 2017
+  language: en-GB
+  page: null
+  title: 'Growing the biphasic framework: techniques and recommendations for fitting
+    emerging growth models'
+  title-short: Growing the biphasic framework
+  type: article-journal
+  volume: In Review
+df_print: kable
+---
+
+
+```{r setup, include=FALSE, cache=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE)
+opts_chunk$set(tidy=TRUE)
+opts_chunk$set(fig.show = "hold", collapse=TRUE)
+#library(devtools)
+#install.packages("knitcitations")
+library(knitcitations)
+cleanbib()
+options("citation_format" = "pandoc")
+par(mfrow=c(1,1))
+```
+This appendix is in support of @WilsonInReview. The citation style language (csl) used herein is the methods-in-ecology-and-evolution.csl file which can be downloaded from https://github.com/citation-style-language/styles/blob/master/methods-in-ecology-and-evolution.csl and placed in the same directory as this .rmd file.
+
+<br>
+
+This file contains example code for estimating age-at-maturity and other life history parameters from length-at-age data using a Lester biphasic growth model `r citep("10.1098/rspb.2004.2778")`. The model is fit using a profile likelihood approach. This code is similar to that used in `r citep("10.1002/eap.1421")`.
+
+<br>
+
+First, we load the required `boot` library.
+
+```{r}
+# Load required library
+library(boot) # use install.packages('boot') if package isn't already installed
+```
+
+<br>
+
+### Data generation
+We generate realistic length-at-age data based on the Lester model. Somatic growth rate $h$ (h.1 in the code below) can be any positive number and represents the length (in mm) accumulated per year in the late-stage juvenile phase. The variable $l_0$ (`l.0`) represents the y-intercept of the juvenile growth phase. We use a reasonable value for the precision (prec; i.e., the inverse of coefficient of variation) in length-at-age of 12, a typical observation for fisheries data (see review in `r citet("10.1016/j.fishres.2016.01.006")`). The variable $T$ (`t`) represents the age at which individuals begin to invest energy into reproduction (i.e., age-at-maturity). The parameter $g$ represents the cost to somatic growth of maturity, which is often assumed to be dominated by investment in reproduction. Note that $g$ must be positive and has an intrinsic maximum such that: $$ g \sim \{0,3/(T-t_1)\}. $$
+
+In this case, we set $g = 0.25 \; yr^{-1}$.
+
+
+```{r}
+## Input known parameters for simulating data
+l.0<-100 ## y-intercept of immature phase (mm)
+h.1<-50 ## immature somatic growth rate (h; mm/yr)
+g.mat<-0.25 ## cost to somatic growth of maturity (g; equivalent energetic units)
+t.1 = -l.0/h.1  ##  Lester hypothetical age at length 0 (yr)
+t=5 ## Lester model age-at-maturity (yr)
+prec = 12 # precision in length-at-age (inverse of coefficient of variation) -- adjust as needed. Model estimates will become more inaccurate as precision decreases. Precision = 12 is realistic for fisheries data.
+```
+
+<br>
+
+Next, we convert the Lester parameters to von Bertalanffy parameters, which describe the asymptotic growth of the adult phase. We then calculate the mean lengths-at-age for both phases of growth.
+
+```{r}
+L.inf = 3*h.1/g.mat ## von Bertalanffy asymptotic length (mm)
+k.mat = log(1 + g.mat/3) ## Brody growth coefficient
+t.0 = t + log(1-(g.mat*(t-t.1)/3))/log(1+g.mat/3) ## von Bertalanffy hypothetical age at length 0 (yr)
+
+#Generate mean lengths-at-age for all fish (immature and mature), based on input parameters
+imm.list<-c(1:t) # immature ages
+mat.list<-c((t+1):25) # Mature ages, with maximum age = 25 years
+imm.means<-sapply(imm.list,function(x) l.0+h.1*x) # mean lengths-at-age for immature fish
+mat.means<-sapply(mat.list,function(x) L.inf*(1-exp(-k.mat*(x-t.0)))) # mean lengths-at-age for mature fish
+means<-c(imm.means,mat.means) # concatenate mean lengths-at-age into one vector
+```
+
+<br>
+
+We adjust sample sizes-at-age to make the data as realistic as possible. In this case, we attempt to account for gear selectivity and natural mortality. We first create a population of 1000 individuals with a sample sizes-at-age that are similar to what is often seen in fisheries data.  We then draw a random sample (in this case, 300 data points) from the 1000 individual population. We set the seed for the random number generator to make our results repeatable: `set.seed(2017)`. However, those that wish to bootstrap this approach (or alter the code for some other purpose) may wish to remove this command. Finally, we plot the data.
+
+```{r}
+## Generate data. Sample sizes for each age are realistic for fisheries data, based on gear selectivity and natural mortality.
+set.seed(2017)
+samp.size<-c(30,70,130,140,150,130,65,45,38,32,28,24,22,18,15,12,10,8,7,6,5,5,4,3,3) #set sample sizes for each age, based on a population of 1000 individuals
+mean.samp<-as.data.frame(cbind(means,samp.size)) #make data frame of mean lengths-at-age and sample sizes
+mlen<-rep(mean.samp[,1],mean.samp[,2]) #repeat each mean "sample size" number of times
+a<-(1:25) #vector of ages
+ages<-rep(a,mean.samp[,2]) #repeat each age "sample size" number of times
+lengths<-sapply(mlen,function(x) rnorm(1,mean=x,sd=x/prec)) #generate random normal length data using means & precision
+Data<-as.data.frame(cbind(ages,lengths)) #bind vectors into age and length matrix, convert to data frame
+Data<-Data[sample(nrow(Data),size=300,replace=F),] #draw a random sample from the population -- sample size can be adjusted
+plot(Data$ages,Data$lengths, ylab="Length (mm)",xlab="Age (yr)") ## plot length-at-age
+```
+
+<br>
+
+### Likelihood function
+
+Next, we specify the likelihood function. We estimate four parameters within the likelihood function itself: $h$ (h1), $l_0$, $g$, and the standard deviation in length-at-age (sighat). We provide conversions for the von Bertalanffy (mature) growth parameters, and we define immature and mature ages and lengths based on the age-at-maturity $T$ (mat.age), which we will estimate using a profile likelihood approach (see Optimization -> Profiling for $T$). In order to improve fit quality, we also include marginal likelihoods for $h$ and $l_0$. These likelihoods are analogous to prior probability distributions in a Bayesian framework, and they help to ensure that the model converges on realistic parameter estimates. If desired, one can remove these likelihoods from the function.
+
+```{r}
+## Store Lester model likelihood function as 'Lester.func' excluding age-at-maturity parameter. Optional: include marginal likelihoods for immature growth slope and intercept
+
+Lester.func = function(parms) { 
+  # list parameters
+  l0 = parms[1]
+  h1 = parms[2]
+  g = inv.logit(parms[3])   
+  sighat = sqrt(parms[4]) 
+  
+  age.i = age[age<=mat.age] ## define immature ages
+  len.i = len[age<=mat.age] ## define immature lengths
+  age.m = age[age>mat.age] ## define mature ages
+  len.m = len[age>mat.age] ## define mature lengths
+  
+  ## Lester model equations
+  t1 = -l0/h1                                          
+  Linf = 3*h1/g
+  k = log(1 + g/3)
+  t0 = mat.age + 
+    suppressWarnings(log(1-(g*(mat.age-t1)/3)))/log(1+g/3)                                  
+  mn.i = l0 + h1*age.i # immature growth
+  mn.m = Linf*(1-exp(-k*(age.m-t0))) # mature growth
+  
+  ## Likelihoods
+  l0.lik = dnorm(l0,mean=l0est,sd=25,log=T) #optional (distribution can be adjusted if needed)
+  h1.lik = dnorm(h1,mean=h1est,sd=5, log=T) #optional (distribution can be adjusted if needed)
+  L.i = dnorm(len.i,mean=mn.i,sd=sighat,log=T) # immature likelihood
+  L.m = dnorm(len.m,mean=mn.m,sd=sighat,log=T) # mature likelihood
+  return(sum(c(L.i,L.m, l0.lik,h1.lik)))
+}
+```
+
+
+<br>
+
+### Optimization
+To fit the model, we first assign our age and length data vectors to 'age' and 'len', which are specified in the likelihood function. We then fit a linear model to the first few ages of data, and we use the slope and y-intercept estimates from that linear fit to inform our marginal likelihoods for $h$ and $l_0$, respectively. This process generally improves full-model convergence without leveraging information outside of the data. That being said, both this linear model fit and the inclusion of the marginal likelihoods for $h$ and $l_0$ in the likelihood function are optional. 
+
+
+```{r}
+## Assign ages as 'age' and lengths as 'len' for likelihood function
+age = Data$ages
+len = Data$lengths 
+
+## OPTIONAL: Use linear model fit to first few years of growth to inform marginal likelihoods for immature growth slope & intercept
+immdata<- Data[ which(age <= (min(age)+3)), ] #choose data within first four ages -- number of ages can be changed
+immout<-lm(lengths~ages, data=immdata) #linear regression on "immature" data
+l0est<-immout$coefficients[[1]] # store intercept estimate, used for prior likelihood
+h1est<-immout$coefficients[[2]] # store slope estimate, used for prior likelihood
+```
+
+
+<br>
+
+Next, we provide starting values for each parameter. We use the parameter estimates from the linear model fit as starting values for $l_0$ and $h$, and we choose values for $g$ and the error term.
+
+```{r}
+## List starting values for each parameter
+l0 = l0est # early growth intercept (if you skipped Step 4, you should put a number here)
+h1 = h1est # early growth slope (if you skipped Step 4, you should put a number here)
+g = 0.2  # cost to somatic growth of maturity
+sighat = 25 # standard deviation
+parms=c(l0,h1,logit(g),sighat^2)  #compile parameters
+```
+
+<br>
+
+#### Profiling for $T$
+The profiling procedure uses an iterative approach to find the most likely value for $T$ (and the remaining four parameters). In essence, we (1) fix $T$ at some value, (2) fit the model to the data (estimating the remaining parameters), and (3) store the results, including the full-model likelihoods. We then repeat this procedure for a large number of potential values for $T$. In this case, our vector of potential $T$ values ranges from ages 2-20 yr in 0.025 yr increments. We loop through this vector, using `optim()` to optimize the likelihood function for each potential value of $T$. We store our results for each iteration in a matrix, and we include an `if()` statement to ignore results from fits for which the model did not converge. 
+
+```{r}
+## Create a vector of potential values for age-at-maturity and a matrix for storing parameter estimates
+Mat.age = seq(2,20,by=0.025) #  range of mat.age values for profile likelihood calculation -- adjust as needed
+lik<-l0<-h1<-g<-var<-rep(NA,length(Mat.age)) # create empty vectors for parameters
+mat.age.Lik = cbind(Mat.age,lik,l0,h1,g,var) # create matrix for storing parameter estimates
+
+
+
+## Optimize likelihood function for each potential age-at-maturity value and store parameter estimates
+for(j in 1:length(Mat.age)) {
+  mat.age = Mat.age[j] # fix age-at-maturity at a given value
+  L.out = try(optim(par=parms,fn=Lester.func, 
+                    control=list(fnscale=-1,reltol=1e-8)), silent=T) # optimize likelihood function
+  check<-is.numeric(L.out[[1]]) # check to see if model converged
+  
+  ## store values only if model converged
+  if (check[[1]] == "TRUE"){
+    
+    #Store parameter values (back-transform g)
+    mat.age.Lik[j,2] <- L.out$value
+    mat.age.Lik[j,3] <- L.out$par[[1]]
+    mat.age.Lik[j,4] <- L.out$par[[2]]
+    mat.age.Lik[j,5] <- inv.logit(L.out$par[[3]])
+    mat.age.Lik[j,6] <- L.out$par[[4]]
+  }
+}
+```
+
+
+<br>
+
+### Compiling and visualizing results
+To view our results, we first convert our output matrix from the profiling procedure to a data frame for easier manipulation, and we remove NAs (failed model fits). We then simply find the maximum full-model likelihood value within our data frame. Our parameter estimates correspond with this maximum likelihood value. 
+```{r}
+## Compile results
+mat.age.Lik<-as.data.frame(mat.age.Lik) # convert to data frame for easier referencing
+mat.age.Lik<-mat.age.Lik[which(mat.age.Lik$lik != "NA"),] # remove failed runs
+mle = max(mat.age.Lik$lik) # find maximum likelihood
+MLE<-mat.age.Lik[which(mat.age.Lik$lik == mle),] # maximum likelihood estimates for all parameters
+MLE # print maximum likelihood estimates
+```
+
+<br>
+In this case, our estimate for $T$ is 4.9 yr, which is quite close to the simulated 'true' value of 5 yr. The other parameter estimates are also close to the simulated values, and will approach those simulated values as precision and sample size increase. For instance, if one increases the precision in length-at-age to 25, the estimate for $l_0$ increases to approximately 96 mm (simulated value = 100 mm). 
+
+<br>
+
+A handy way to examine model fit quality is to plot the likelihood profile for $T$. In general, the presence of one distinct likelihood peak and a relatively narrow confidence interval indicate a good fit. However, there may be some cases for which the model fits well even when these criteria are not met (e.g., large variability in age-at-maturity in a population, leading to a wide confidence interval around $T$; multiple ages-at-maturity across cohorts due to plastic or evolutionary life history changes, leading to multiple likelihood peaks; etc.).
+
+```{r}
+## Plot likelihood profile
+rlike = exp(mat.age.Lik$lik-mle)
+plot(mat.age.Lik$Mat.age,rlike,xlab="Age-at-maturity (T, yr)", 
+     ylab="Likelihood ratio")
+
+
+## Confidence interval in terms of chi-squared (~ 95% CI)
+ndx1 = which(mat.age.Lik$lik>(mle-1.92)) # change '1.92' to 0.228 for 50% CI, 1.36 for 90% CI
+points(mat.age.Lik$Mat.age[ndx1],rep(0,length(ndx1)),col='red',lwd=6)
+CI = c(min(mat.age.Lik$Mat.age[ndx1]),max(mat.age.Lik$Mat.age[ndx1]))
+CI # print confidence interval
+```
+
+This figure shows the likelihood ratio profile for $T$ across all of the values for which the model converged. The peak of this profile corresponds to the maximum likelihood estimate for $T$. The red line beneath the peak is the 95% confidence interval.
+
+<br>
+
+Finally, we can examine the fit by plotting the curves onto the data:
+
+```{r}
+## Plot biphasic growth curves onto data
+plot(age,len,xlab="Age (yr)",ylab="Length (mm)",xlim=c(0,max(age)+1),ylim=c(0,max(len)+20),xaxs='i',yaxs='i')  
+g. = MLE[[5]]
+h1. = MLE[[4]]
+mT = MLE[[1]]
+l0. = MLE[[3]]
+t1. = -l0./h1.
+Linf = 3*h1./g.
+k = log(1 + g./3)
+t0 = mT + log(1-(g.*(mT-t1.)/3))/log(1+g./3)
+segments(0,l0.,x1=mT,y1=l0.+h1.*mT,lwd=3)  
+matX = seq(mT,max(age),length.out=25)
+matY = Linf*(1-exp(-k*(matX-t0)))
+lines(matX,matY,col='red',type='l',lwd=6,lty=1)
+abline(v=mT,lty=2)
+```
+
+In this figure, the black line is the immature growth phase, and the red line is the mature growth phase. Growth shifts from the immature to the mature phase at $T$, which we've estimated to be 4.9 yr (dashed vertical line; 'true' value = 5 yr).
+
+## References
+```{r references, echo=FALSE, message=FALSE}
+write.bibtex(file="Appendix_D_references.bib")
+```
