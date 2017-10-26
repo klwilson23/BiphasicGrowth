@@ -1,0 +1,549 @@
+---
+title: |
+  | Appendix H:
+  | Estimating biphasic growth for multiple populations using MCMC
+author: |
+  | Kyle L. Wilson
+  | The University of Calgary
+date: "October 5, 2017"
+output:
+  html_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_H_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+  fig_caption: yes
+  fig_height: 6
+  fig_width: 7
+  fontsize: 11pt
+  highlight: tango
+  df_print: kable
+  pdf_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_H_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+references:
+- DOI: null
+  URL: null
+  author:
+  - family: Wilson
+    given: K. L.
+  - family: Honsey
+    given: A.
+  - family: Moe
+    given: B.
+  - family: Venturelli
+    given: P.
+  container-title: Methods in Ecology and Evolution
+  id: WilsonInReview
+  issue: null
+  issued: 2017
+  language: en-GB
+  page: null
+  title: 'Growing the biphasic framework: techniques and recommendations for fitting
+    emerging growth models'
+  title-short: Growing the biphasic framework
+  type: article-journal
+  volume: In Review
+- DOI: null
+  URL: null
+  author:
+  - family: Gelman
+    given: A.
+  - family: Carlin
+    given: J.
+  - family: Stern
+    given: H.
+  - family: Dunson
+    given: D.
+  - family: Vehtari
+    given: A.
+  - family: Rubin
+    given: D.
+  edition: 3
+  id: Gelman2013
+  issue: null
+  issued: 2013
+  language: en-GB
+  location: Boca Raton, FL
+  page: null
+  publisher: Chapman and Hall/CRC Press
+  title: Bayesian Data Analysis
+  title-short: BDA3
+  type: book
+  volume: null
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE)
+opts_chunk$set(tidy=TRUE)
+opts_chunk$set(fig.show = "hold", collapse=TRUE)
+#library(devtools)
+#install.packages("knitcitations")
+library(knitcitations)
+cleanbib()
+options("citation_format" = "pandoc")
+```
+
+##Summary description of objectives:  
+
+This appendix is in support of @WilsonInReview. The citation style language (csl) used herein is the methods-in-ecology-and-evolution.csl file which can be downloaded from https://github.com/citation-style-language/styles/blob/master/methods-in-ecology-and-evolution.csl and placed in the same directory as this .rmd file.
+
+
+The following is an example application of the Lester biphasic model `r citep("10.1098/rspb.2004.2778")` where the breakpoint $T$ (age-at-maturity) is treated as unknown prior to model estimation. Specifically, we simulate multiple populations, and the life history of each population is related to that of other populations in a hierarchical manner (i.e., each life history parameter is random arising from a global distribution for that life history parameter). Known growth parameters are used to simulate the random, population-specific parameters. We generate size-at-age data given a population-specific, constant coefficient of variation in size-at-age. 
+
+We then fit the Lester biphasic model to these simulated data using a hierarchical framework in the Bayesian MCMC software JAGS. This framework allows us to estimate population-specific and 'global' (i.e., average across populations) growth parameters. We build the hierarchical model with vague priors (or hyperpriors), and we run JAGS from the R console using the `runjags` package and `run.jags()` function. JAGS  must be installed independently prior to running this code (see 'http://mcmc-jags.sourceforge.net/'). All variables are treated as unknown at both the population and 'global' levels. 
+
+Our results summarize variables by their marginal posterior distribution. We then compare the central tendency of each parameter's posterior distribution to determine how well we recover the simulated 'true' parameters at the population and global levels.
+
+## Global functions
+
+First, we will define a few global functions that will be used later.
+
+```{r used_Functions}
+
+Corner_text <- function(text, location="topright") #function to write text to the corner of plots
+{
+  legend(location,legend=text, bty ="n", pch=NA)
+}
+
+get_beta <- function(mean,cv) #function that returns the alpha and beta shape parameters of a beta distribution, based on the mean and variation of a given beta distribution
+{
+  sd <- mean*cv
+  alpha <- -((mean*(mean^2+sd^2-mean))/sd^2)
+  beta <- alpha/mean-alpha
+  return(list(alpha=alpha,beta=beta))
+}
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+
+rngList <- function(x,y){ #this function creates randomly 'jittered' starting values for each MCMC chain
+  lis <- lapply(x, lapply, length) #get the lower order dimensions of the list x
+  names(lis) <- lapply(x, length) #get the names of those dimensions of the list x
+  l_el <- length(names(lis)) #get the maximum number elements of the highest order dimensions of the list x
+  for(i in 1:(l_el-2)) #loop through those dimensions which need to be 'jittered'
+  {
+    x[[i]] <- x[[i]]*(1+runif(1,-0.15,0.15)) #jitter values of the list by +/- 15%
+  }
+  x[[l_el]] <- round(runif(1,1,100000),0) #have a random RNG seed for the MCMC chain
+  return(x)
+}
+
+```
+
+## Define life history parameters
+
+First, we must load the required libraries. We then start the simulation by specifying how many populations we want to model with `npop`. Then, we specify the leading life history parameters of the growth model: $h$, $t_1$, $M$, $g$, and $cv$. Consistent with the hierarchy of the model, we specify the among-population variation of each life history parameter (e.g., `h_cv` describes the coefficient of variation in the parameter $h$ across all populations). The $cv$ parameter for variation in length-at-age is 15%, consistent with typical observations among fishes `r citet("10.1016/j.fishres.2016.01.006")`.
+
+```{r true_parameters}
+library(runjags) #load, install, or require the 'runjags' library
+library(rjags)
+library(coda)
+library(stats4) #load the 'stats4' library
+library(corrplot)
+
+nPop <- 10 ## how many populations are there?
+
+ages <- 1:30 #create an integer sequence of ages
+
+Tmat <- 8 # age of maturity
+Tmat_cv <- 0.1 # what is the variation in maturity across populations?
+
+h <- 50 # somatic growth in millimeters per year
+h_cv <- 0.15 # what is the variation in growth rate across populations?
+
+t1 <- -0.2 #age when size=0 for the juvenile phase
+t1_cv <- 0.1 # what is the variation in age when size=0 across populations?
+
+M <- 0.15 #Natural mortality for the population
+g <- 1.18*(1-exp(-M)) # proportion of energy in adult phase allocated to reproduction per year
+g_cv <- 0.01 # what is the variation in g across populations?
+
+cv <- 0.15 # coefficient of variation in size-at-age
+sizeCV <- 0.000000001 # what is the variation in the CV parameter across populations?
+#i.e., are some populations more variable in size-at-age than others?
+
+linf <- 3*h/g # convert to VBGF L-infinity
+vbk <- log(1+g/3) # convert to VBGF kappa
+t0 <- Tmat + log(1-g*(Tmat-t1)/3)/log(1+g/3) #convert to VBGF t0
+
+lena_phase1 <- h*(ages-t1) # length-at-age for phase 1
+lena_phase2 <- linf*(1-exp(-vbk*(ages-t0))) # length-at-age for phase 2
+biphasic <- ifelse(ages<Tmat,lena_phase1,lena_phase2) #if-else statement for which phase a fish is allocating surplus energy
+
+plot(ages,lena_phase1, ylab="Size", xlab="Age")
+lines(ages,lena_phase2)
+lines(ages,biphasic)
+abline(v=Tmat,col='red',lty=2) #plot where maturity occurs
+
+
+```
+
+Next, we generate the population-specific life history parameters, which arise as a random variable from that parameter's distribution. For instance, for $h$:
+
+
+$$h_i \sim N(\mu, \sigma)$$
+with  mean $\mu$ and variance $\sigma$ of this distribution:  
+
+$$\mu = h$$
+$$\sigma = h*cv_\text{h}$$
+We set the random number generator to 100 so that our results are repeatable: `set.seed(100)`.
+
+```{r generate Hierarchy, message=FALSE}
+set.seed(100)
+h_i <- rnorm(nPop,h,h*h_cv) # growth rate, h, for population i is random arising from a normal distribution with mean h and standard deviation of h*h_cv
+Tmat_i <- rnorm(nPop,Tmat,Tmat*Tmat_cv)
+t1_i <- rnorm(nPop,t1,abs(t1*t1_cv))
+g_i <- rbeta(nPop,get_beta(g,g_cv)$alpha,get_beta(g,g_cv)$beta) # grab the shape parameters of a beta distribution based on its mean and variance
+ifelse(all(g_i < 3/(Tmat_i-t1_i)), # there is a life-hisory constraint on the parameter g
+       g_i <- g_i,
+       g_i <- rbeta(nPop,get_beta(g,g_cv)$alpha,get_beta(g,g_cv)$beta))
+cv_i <- rnorm(nPop,cv,cv*sizeCV)
+
+true.par <- list(h=h,T50=Tmat,t1=t1,g=g,sizeCV=cv,
+                  h_pop=h_i,T50_pop=Tmat_i,t1_pop=t1_i,g_pop=g_i,
+                  h_cv=h_cv,T50_cv=Tmat_cv,t1_cv=t1_cv,g_cv=g_cv)
+```
+
+
+## Simulating the data
+Next, we make an empty data object which we later fill with our population-specific, randomly generated length-at-age data. We use $M$ to generate each population's survivorship curve. This allows us to simulate more realistic age-structures (by multipltying $M$ by selectivity). We generate data using a random normal distribution (realized parameter values and model fit quality will change due to randomness) using the `rnorm()` function. Sample sizes expected for each age should be realistic for fisheries data and are determined from a function of gear selectivity and natural mortality (or survivorship) arising from a multinomial process using the `rmultinom()` function.
+
+```{r generate Data, message=FALSE}
+dataPop <- NULL # make an empty object that we will fill in later
+for(i in 1:nPop)
+{
+  surv <- rep(NA,length(ages)) # create an empty vector
+  surv[1] <- 1;for(j in 2:max(ages)){surv[j]<-surv[j-1]*exp(log(((g_i[i]/1.18)-1)/-1))} #survivorship from discrete annual survival
+  gearA50 <- Tmat_i[i] # induce a gear selectivity that inflects at T
+  gearSlope <- -0.3 # define the slope of selectivity
+  select <- 1/(1+exp(gearSlope*(ages-gearA50))) # the average selectivity curve
+  
+  
+  linf <- 3*h_i[i]/g_i[i] # conversion for the VBGF L-infinity
+  vbk <- log(1+g_i[i]/3) # conversion for the VBGF parameter kappa
+  t0 <- Tmat_i[i] + log(1-g_i[i]*(Tmat_i[i]-t1_i[i])/3)/log(1+g_i[i]/3) #conversion for the VBGF parameter t0
+  lena_juv <- h_i[i]*(ages-t1_i[i]) # length-at-age for phase 1
+  lena_adult <- linf*(1-exp(-vbk*(ages-t0))) # length-at-age for phase 2
+  mean_size <- ifelse(ages<=Tmat_i[i],lena_juv,lena_adult) #if-else statement for which phase a fish is allocating surplus energy
+  
+  SampSize <- 10000
+  maxSamp <- as.vector(rmultinom(1,prob=surv*select,size=SampSize)) # whats the maximum number of observable samples for an age group in a population? 
+  # surv*select is the probability of a fish surviving a certain ageand being sampled
+  
+  mean.samp <- as.data.frame(cbind(mean_size,maxSamp)) #make matrix of mean lengths-at-age and sample sizes
+  mlen <- rep(mean.samp[,1],mean.samp[,2]) #repeat each mean "sample size" number of times
+  ageData <- rep(ages,mean.samp[,2]) #repeat each age "sample size" number of times
+  lengths <- sapply(mlen,function(x) rnorm(1,mean=x,sd=x*cv)) #generate random normal length data using means & cv error
+  Data <- data.frame(cbind(ageData,lengths,rep(i,length(ageData))),row.names=NULL) #bind vectors into age and length matrix, covert to data frame
+  colnames(Data) <- c("Age","Size","Pop_Num") # re-name the columns
+  Data <- Data[sample(nrow(Data),size=round(runif(1,40,200)),replace=F),] #draw a random sample from the population -- total sample size can be adjusted
+  rownames(Data) <- c()
+  dataPop <- rbind(dataPop, Data)
+}
+
+rownames(dataPop) <- c()
+```
+
+Next, we plot the noisy data, with colors assigned to the data coming from each population. We can also take a quick look at some of the data to visualize the data structure.
+
+```{r PlotData}
+plot(dataPop$Age,dataPop$Size,bg=dataPop$Pop_Num,pch=21, xlab="Age (yrs)",ylab="Length (mm)")
+
+dataPop[sample(1:nrow(dataPop),10),]
+
+```
+
+## Write the hierarchical model in JAGS
+
+The following code is written in the JAGS language `r citep("http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.13.3406")`. JAGS is fed a list associated with the data. Each data point has an population identification index. 
+
+The JAGS model loops through each sample, from *i* to *Nfish*, and determines the contribution of the predicted size of fish *i* to the log-posterior density, which is the sum of the log-likelihood and the log-prior. The predicted growth follows the analytical model from the equations in Lester et al. (2004). There is an if-else statement that determines if the predicted size-at-age of fish *i* comes from the juvenile phase or the adult phase. The priors for each population's life history trait e.g., $h$ for population *j*, comes from a global hyper-prior for $h$ representing the average across all populations. Modifications to this code will need to use JAGS syntax and not R syntax.  
+
+
+```{r JAGSmodel}
+model <- "model {
+#run through all the individual fish
+for(i in 1:Nfish) {
+  size[i] ~ dnorm(pred[i],1/(pred[i]*size.cv)^2)T(0,) # one variability across all populations 
+  
+  #predict growth for each fish
+  juv[i] <- h_pop[Pop[i]]*(age[i]-t1_pop[Pop[i]]) # predicted growth for fish i for the juvenile phase
+  
+  # below is the predicted growth for fish i for the adult phase which follows converting Lester et al. (2004) equations into the von Bertalanffy growth function
+  
+  adult[i] <- (3*h_pop[Pop[i]]/g_pop[Pop[i]])*(1-exp(-(log(1+g_pop[Pop[i]]/3))*(age[i]-(T50_pop[Pop[i]]+log(1-g_pop[Pop[i]]*(T50_pop[Pop[i]]-t1_pop[Pop[i]])/3)/log(1+g_pop[Pop[i]]/3)))))
+  pred[i] <- ifelse(age[i]<=T50_pop[Pop[i]],juv[i],adult[i]) # does the age of fish i exceed the maturity predicted for its population?
+
+} # end the calculation of the likelihood
+
+
+# priors by population
+for(j in 1:Npop) {
+  # normal priors for population j
+  T50_pop[j] ~ dnorm(T50,tau.T50)T(0,)
+  h_pop[j] ~ dnorm(h,tau.h)T(0,)
+  t1_pop[j] ~ dnorm(t1, tau.t1)
+
+  # Beta distribution for the reproductive investment
+  #(bounded between 0 and stochastic upper limit)
+
+  g_pop[j] ~ dbeta(beta_alpha,beta_beta)T(,3/(T50_pop[j]-t1_pop[j]))
+
+} # end the priors for each trait by population
+
+
+# hyper priors on life history traits
+
+T50 ~ dnorm(10,1e-7)T(0,)
+h ~ dnorm(40,1e-7)T(0,)
+t1 ~ dnorm(0,1e-2)
+g ~ dgamma(0.001,0.001)T(,3/(T50-t1))
+
+# below are the half-t priors on variance parameters
+
+T50_cv ~ dhalfcauchy(10)
+h_cv ~ dhalfcauchy(10)
+g_cv ~ dhalfcauchy(10)
+t1_cv ~ dhalfcauchy(10)
+size.cv ~ dhalfcauchy(10)
+
+# conversion to JAGS precision parameters
+
+tau.T50 <- 1/(T50*T50_cv)^2
+tau.h <- 1/(h*h_cv)^2
+tau.t1 <- 1/(t1*t1_cv)^2
+
+# re-parameterize the parameters of the beta
+
+g_var <- (g*g_cv)^2
+beta_alpha <- -g*(g_var+g^2-g)/g_var
+beta_beta <- beta_alpha/g-beta_alpha
+}"
+```
+
+Let's quickly look at how many samples we have for each of the populations. Then, we will compile the data into a usable list, and pass JAGS some initial starting values for each of the MCMC chains that we will run.
+
+```{r initialValues, message=FALSE}
+print(table(dataPop$Pop_Num))
+data <- list(Nfish=length(dataPop$Age),
+             Npop=length(unique(dataPop$Pop_Num)),
+             age=dataPop$Age,
+             size=dataPop$Size,
+             Pop=dataPop$Pop_Num)
+# the above list compiles the noisy data from the dataPop dataframe
+# into 3 vectors for age, size, and Pop (numerically, which population does each row correspond to?)
+
+inits1 <- list(h=h,
+              T50=Tmat,
+              g=g,
+              t1=t1,
+              h_pop=rep(h,nPop),
+              T50_pop=rep(Tmat,nPop),
+              t1_pop=rep(t1,nPop),
+              g_pop=rep(g,nPop),
+              size.cv=cv,
+              h_cv=h_cv,
+              t1_cv=t1_cv,
+              g_cv=g_cv,
+              T50_cv=Tmat_cv,
+              .RNG.name="base::Wichmann-Hill", .RNG.seed=735)
+
+# initial estimates of each parameter must be provided. RNG is random number generators for that chain
+
+inits2 <- inits3 <- inits4 <- inits1
+inits2 <- rngList(inits2,inits1) # jitter chain 2, based on values of chain 1
+inits3 <- rngList(inits3,inits1) # jitter chain 3, based on values of chain 1
+inits4 <- rngList(inits4,inits1) # jitter chain 4, based on values of chain 1
+
+inits <- list(inits1,inits2,inits3,inits4) # compile all initial values into one list
+
+mon_names <- c(names(inits3)[-c(length(inits3),length(inits3)-1)]) # create the stochastic nodes to be monitored
+
+```
+
+## Run the MCMC chains in JAGS
+
+Our next step is to set how many posterior samples we want, the length of the burn-in period and adaptation period, and the thinning rate. Our thinning rate is a somewhat high value of 10-30 - although this slows us down, the expected large correlations between parameters and the Markovian sampling process can lead to high autocorrelation among the consecutive posterior samples. To gain more independent samples, we run each chain longer by increasing our thinning rate while still only taking `Nsamp` number of samples.
+
+We then use the `run.jags()` function to call JAGS to run our model `r citep(citation("runjags"))`. We specify the modules we run, and some other parameters internal to `run.jags()`, like the `method` and `modules`. One can use the `rjparallel` method to parallelize the MCMC estimation and speed up JAGS model run times.
+
+The `summary(results)` command reports some quick MCMC diagnostic tests to assess whether the posterior has converged on a stable distribution. The potential scale reduction factor (also called the Gelman-Rubin test) and the effective number of sample sizes are all reported in this summary output. The library `coda` offers more options for MCMC diagnostics.
+```{r runJAGS, message=FALSE}
+Nsamp <- 1000 # how many posterior samples does each chain need to get, after thinning and burin-in and adaptation?
+thin_rt <- 15 # place some sort of thinning rate?
+burnins <- 0.75*round(Nsamp*thin_rt,0) # how long is the burnin, this bases it on the number of total posterior draws?
+adaptin <- round(0.4*burnins,0)
+
+a <- proc.time();
+results <- run.jags(model=model, monitor=mon_names, 
+                    data=data, n.chains=4, method="rjags", inits=inits,
+                    plots=F,silent.jag=F, modules=c("bugs","glm","dic"),
+                    sample=Nsamp,adapt=adaptin,burnin=burnins,thin=thin_rt,summarise=F)
+b <- (proc.time() - a)
+
+print((b[3]/60)/60) # how long it took in hours
+print((b[3]/(4*(Nsamp*thin_rt+burnins+adaptin)))) # how long it took in seconds per iteration
+sum_results <- summary(results)
+print(sum_results[,c(1,2,3,8,9,10)])
+res.corr <- extract.runjags(add.summary(results),"crosscorr") # extract the cross-correlation matrix
+```
+
+## Store the model results
+
+
+Next, we store the results as an `mcmc.list` which could be used in `coda` for MCMC diagnostics `r citep(citation("coda"))` (see Appendix E), but here we just quickly coerce this into a `matrix` object for our purposes. We then use some `grep` functions to quickly grab the posterior distributions of monitored parameters associated with specific growth model parameters (e.g., $h$, $h_i$, and $cv_\text{h}$.
+
+We can do some further diagnostics of the model by evaluating how biased the estimates of the growth parameters were in comparison to the simulated 'true' parameter values. To do this, we will use percent bias: $$Bias = ((\theta_i - \hat{\theta_i})/\theta_i) * 100$$  
+where $\theta_i$ is a life history parameter of interest, e.g., juvenile growth rate $h_i$.
+
+```{r DataStorage,message=FALSE}
+TheRes <- as.mcmc.list(results, vars=mon_names)
+TheRes <- as.matrix(TheRes)
+
+Ntot <- length(dataPop$Pop_Num)
+Npop <- table(dataPop$Pop_Num)
+
+h_plot <- cbind(TheRes[,grep("h",colnames(TheRes))])
+Tmat_plot <- cbind(TheRes[,grep("T",colnames(TheRes))])
+g_plot <- cbind(TheRes[,grep("g",colnames(TheRes))])
+t1_plot <- cbind(TheRes[,grep("t1",colnames(TheRes))])
+var_plot <- cbind(TheRes[,grep("cv",colnames(TheRes))])
+
+hBias <- Tbias <- gBias <- t1Bias <- matrix(NA,ncol=ncol(h_plot)-1,nrow=nrow(h_plot))
+for(i in 1:(ncol(h_plot)-1))
+{
+  hBias[,i] <- (h_plot[,i]-c(h,h_i)[i])/c(h,h_i)[i]*100
+  Tbias[,i] <- (Tmat_plot[,i]-c(Tmat,Tmat_i)[i])/c(Tmat,Tmat_i)[i]*100
+  gBias[,i] <- (g_plot[,i]-c(g,g_i)[i])/c(g,g_i)[i]*100
+  t1Bias[,i] <- (t1_plot[,i]-c(t1,t1_i)[i])/c(t1,t1_i)[i]*100
+}
+
+varBias <- matrix(NA,ncol=ncol(var_plot),nrow=nrow(var_plot))
+for(i in 1:ncol(var_plot))
+{
+  varBias[,i] <- (var_plot[,i]-c(h_cv,Tmat_cv,g_cv,t1_cv,cv)[i])/c(h_cv,Tmat_cv,g_cv,t1_cv,cv)[i]*100
+}
+
+```
+
+## Percent bias and correlation plots
+
+The code below generates a plot showing percent bias for each of the estimated parameters, along with some example correlations between the parameters $T_i$ and $h_i$.
+
+```{r PlotBias}
+par(mfrow=c(1,1))
+par(mar=c(4,4,1,1))
+layout(matrix(c(1,2,3,4,5,6),nrow=3,ncol=2,byrow=TRUE))
+
+boxplot(Tbias,ylab="Percent Bias in T",col="grey80",outline=FALSE,xaxt="n")
+axis(1,1:(length(Tmat_i)+1),c("T",paste("T(",1:nPop,")",sep="")),line=0,cex.axis=0.9)
+axis(1,1:(length(Tmat_i)+1),paste("N=",c(Ntot,Npop),sep=""),line=0.75,tick=F,cex.axis=0.8)
+
+abline(h=0,lty=2,col="red",lwd=2)
+Corner_text("a.","topleft")
+
+boxplot(hBias,ylab="Percent Bias in h",col="grey80",outline=FALSE,xaxt="n")
+axis(1,1:(length(h_i)+1),c("h",paste("h(",1:nPop,")",sep="")),cex.axis=0.9)
+axis(1,1:(length(Tmat_i)+1),paste("N=",c(Ntot,Npop),sep=""),line=0.75,tick=F,cex.axis=0.8)
+abline(h=0,lty=2,col="red",lwd=2)
+Corner_text("b.","topleft")
+
+boxplot(gBias,ylab="Percent Bias in g",col="grey80",outline=FALSE,xaxt="n")
+axis(1,1:(length(g_i)+1),c("g",paste("g(",1:nPop,")",sep="")),cex.axis=0.9)
+axis(1,1:(length(Tmat_i)+1),paste("N=",c(Ntot,Npop),sep=""),line=0.75,tick=F,cex.axis=0.8)
+abline(h=0,lty=2,col="red",lwd=2)
+Corner_text("c.","topleft")
+
+boxplot(t1Bias,ylab="Percent Bias in t1",col="grey80",outline=FALSE,xaxt="n")
+axis(1,1:(length(t1_i)+1),c("t1",paste("t1(",1:nPop,")",sep="")),cex.axis=0.9)
+axis(1,1:(length(Tmat_i)+1),paste("N=",c(Ntot,Npop),sep=""),line=0.75,tick=F,cex.axis=0.8)
+abline(h=0,lty=2,col="red",lwd=2)
+Corner_text("d.","topleft")
+
+boxplot(varBias,ylab="Percent Bias in Variance Terms",col="grey80",outline=FALSE,xaxt="n")
+axis(1,1:length(c(h_cv,Tmat_cv,g_cv,t1_cv,cv)),c("cv(h)","cv(T)","cv(g)","cv(t1)","cv(L)"),cex.axis=0.9)
+abline(h=0,lty=2,col="red",lwd=2)
+Corner_text("e.","topleft")
+
+corr.mat <- res.corr[5:14,15:24]
+name1 <- name2 <- c()
+for(i in 1:nPop)
+{
+  name1[i] <- paste("h(",i,")",sep="")
+  name2[i] <- paste("T(",i,")",sep="")
+}
+rownames(corr.mat) <- name1
+colnames(corr.mat) <- name2
+corrplot(corr.mat,is.corr=TRUE,method="ellipse",mar = c(2, 4, 1, 0), type="lower",diag=T)
+
+Corner_text("f.","topleft")
+```
+
+## Posterior predictive checks
+
+Next, we will run posterior predictive checks, which use the posterior distribution of the parameter estimates to re-generate a randomized posterior distribution of data, assuming the data arose according to the truncated normal distribution (as specified in the model above). We then overlay our observed data atop this distribution to check if there is any systematic bias (@Gelman2013).
+
+```{r PosteriorPredictives, message=FALSE}
+
+age_vec <- c(ages,rev(ages))
+post_pred <- array(NA, dim=c(nrow(TheRes),length(ages),nPop)) 
+# Above code creates an empty array to track size-at-age for population i for posterior draw j
+par(mfrow=c(1,1))
+par(mar=c(5,4,1,1))
+layout(matrix(c(1,2,3,4),nrow=2,ncol=2,byrow=TRUE))
+for(i in 1:nPop)
+{
+  subbed <- subset(dataPop,dataPop$Pop_Num==i)
+  for(j in 1:nrow(TheRes))
+  {
+    h_j <- TheRes[j,match(paste("h_pop","[",i,"]",sep=""),colnames(TheRes))]
+    g_j <- TheRes[j,match(paste("g_pop","[",i,"]",sep=""),colnames(TheRes))]
+    T50_j <- TheRes[j,match(paste("T50_pop","[",i,"]",sep=""),colnames(TheRes))]
+    t1_j <- TheRes[j,match(paste("t1_pop","[",i,"]",sep=""),colnames(TheRes))]
+    cv_j <- TheRes[j,match("size.cv",colnames(TheRes))]
+    
+    linf <- 3*h_j/g_j # conversion for the VBGF L-infinity
+    vbk <- log(1+g_j/3) # conversion for the VBGF parameter kappa
+    t0 <- T50_j + log(1-g_j*(T50_j-t1_j)/3)/log(1+g_j/3) #conversion for the VBGF parameter t0
+    
+    juv_j <- h_j*(ages-t1_j)
+    adult_j <- linf*(1-exp(-vbk*(ages-t0)))
+    pred_j <- ifelse(ages<T50_j,juv_j,adult_j)
+    pred_j[pred_j < 0.001] <- 0.001
+    post_pred[j,,i] <- rnorm(length(ages),pred_j,pred_j*cv_j)
+  }
+  quants <- t(apply(post_pred[,,i],2,FUN=quantile,probs=c(0.025,0.225,0.50,0.775,0.975)))
+  plot(age_vec,c(quants[,1],rev(quants[,5])),type="l",
+       lwd=2,col=NA,
+       ylab="",xlab="",ylim=c(0,1200))
+  axis(1,at=median(c(0,max(ages))),
+       paste("Age (yrs) in ","Population ",i,sep=""),tick=FALSE,line=0.90)
+  axis(2,at=600,"Size (mm)",tick=FALSE,line=1)
+  polygon(age_vec,c(quants[,1],rev(quants[,5])),col="grey50")
+  polygon(age_vec,c(quants[,2],rev(quants[,4])),col="grey95")
+  lines(ages,quants[,3],lwd=2,col="black")
+  points(subbed$Age,subbed$Size,pch=21,bg=rainbow(nPop)[i])
+}
+
+```
+
+
+## References
+```{r references, echo=FALSE, message=FALSE}
+write.bibtex(file="Appendix_H_references.bib")
+```
+
