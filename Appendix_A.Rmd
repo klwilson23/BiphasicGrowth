@@ -1,0 +1,236 @@
+---
+title: |
+  | Appendix A:
+  | Biphasic somatic growth fit in two steps
+author: |
+  | Brian Moe$^1$ and Kyle Wilson$^2$
+  | $^1$Florida State University and $^2$The University of Calgary
+date: "June 21, 2017"
+output:
+  html_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_A_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+  pdf_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_A_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+references:
+- DOI: null
+  URL: null
+  author:
+  - family: Wilson
+    given: K. L.
+  - family: Honsey
+    given: A.
+  - family: Moe
+    given: B.
+  - family: Venturelli
+    given: P.
+  container-title: Methods in Ecology and Evolution
+  id: WilsonInReview
+  issue: null
+  issued: 2017
+  language: en-GB
+  page: null
+  title: 'Growing the biphasic framework: techniques and recommendations for fitting
+    emerging growth models'
+  title-short: Growing the biphasic framework
+  type: article-journal
+  volume: In Review
+- DOI: null
+  URL: null
+  author:
+  - family: Moe
+    given: B. J.
+  genre: Master's
+  id: Moe2015
+  issue: null
+  issued: 2015
+  language: en-GB
+  page: null
+  publisher: Nova Southeastern University
+  title: 'Estimating growth and mortality in elasmobranchs: are we doing it correctly?'
+  title-short: Elasmo
+  type: thesis
+  volume: null
+---
+
+```{r setup, include=FALSE, cache=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE)
+opts_chunk$set(tidy=TRUE)
+opts_chunk$set(fig.show = "hold", collapse=TRUE)
+#library(devtools)
+#install.packages("knitcitations")
+library(knitcitations)
+cleanbib()
+options("citation_format" = "pandoc")
+```
+
+This appendix is in support of the main manuscript in @WilsonInReview. The citation style language (csl) used herein is the methods-in-ecology-and-evolution.csl file which can be downloaded from https://github.com/citation-style-language/styles/blob/master/methods-in-ecology-and-evolution.csl and placed in the same directory as this .rmd file.
+
+
+## Fitting the Lester biphasic growth model in two pieces
+
+The following code and figures highlight fitting the Lester Growth Model to data-limited fishes, particularly elasmobranchs `r citep("10.1098/rspb.2004.2778")`. In this example, the two phases of the Lester model (**immature** and **mature** phases) are fit independently based on individual maturity status of fish. This approach assumes that the **age-at-maturity** is known.
+
+# Data generation
+We come up with true growth parameters for the model. The age range of the fishes were read in as a vector of integers. True somatic growth rate can be any positive number and represents the length (in mm) accumulated per year in the late-stage juvenile phase. The variable $t_1$ represents the hypothetical age when length is 0, it is the *x*-intercept for the juvenile phase. We use a reasonable value for $cv$ of 15%, which is a very typical observation for the coefficient of variation in length-at-age among most fishes (see review in `r citet("10.1016/j.fishres.2016.01.006")`). The variable $T$ (or Tmat in the R code below) represents the age-at-maturity for the population of fish. This could be estimated prior to the growth assessment study or taken from the literature.*g* represents the proportion of energy in the adult phase allocated to reproduction per year. Note that *g* must be positive and has an intrinsic maximum such that: $$ g \sim \{0,3/(T-t_1)\} $$
+
+In this case, we put the true *g* value at the halfway point between $0$ and $3/(T-t_1)$. 
+```{r}
+ages <- 1:10
+Tmat <- 4 # True age at maturity
+h.true <- 45 # somatic growth in millimeters per year
+t1.true <- -0.2 #age when size=0 for the juvenile phase
+g.true <- 0.5*(3/(Tmat-t1.true)) # cost of reproduction
+cv <- 0.15 # coefficient of variation in size-at-age
+```  
+
+Next, we convert the Lester parameters to the von Bertalanffy parameters which describe the asymptotic growth of the adult phase.  
+
+```{r plot1_code, echo = TRUE, fig.show="hold",fig.cap="Somatic growth occurs in two phases: juvenile and adult. Red dashed lines indicate the age- and length-at-maturity. Dashed grey line indicates juvenile growth (including if juveniles never matured). Solid grey line indicates adult asymptotic growth (including if individuals were born mature and were investing into reproduction from hatch/birth). Black dash line indicates the composite growth trajectory of the two phases."}
+linf <- 3*h.true/g.true # convert to VBGF L-infinity
+vbk <- log(1+g.true/3) # convert to VBGF  k
+t0 <- Tmat + log(1-g.true*(Tmat-t1.true)/3)/log(1+g.true/3) #convert to VBGF t0
+lena_phase1 <- h.true*(ages-t1.true) # length-at-age for phase 1
+lena_phase2 <- linf*(1-exp(-vbk*(ages-t0))) # length-at-age for phase 2
+biphasic <- ifelse(ages<Tmat,lena_phase1,lena_phase2) 
+#if-else statement determines whether fish has exceeded age-at-maturity, and thus allocates surplus energy into reproduction
+plot(ages,lena_phase1, ylab="Size", xlab="Age",lty=3,type="l",col="grey50",lwd=3)
+lines(ages,lena_phase2,col="grey50",lwd=3)
+lines(ages,biphasic,lty=2,lwd=3)
+segments(x0=Tmat,x1=Tmat,y0=0,y1=h.true*Tmat+t1.true,col='red',lty=2) #plot where maturity occurs
+segments(x0=0,x1=Tmat,y0=h.true*Tmat+t1.true,y1=h.true*Tmat+t1.true,col='red',lty=2) #plot where maturity occurs
+points(Tmat,h.true*Tmat+t1.true,pch=21,bg="grey50",cex=1.5)
+```  
+
+We then generate fake data using `rnorm()` or some other random number generator of interest. We specify how many fish will be sampled per age bin, how variable the data is within a given length-at-age, generate fake length-at-age data, then compile that data into a data frame object. We set the seed for the random number generator to allow for all users to come to the same results we get in this document: `set.seed(2017)`, but those that wish to bootstrap this approach (or alter the code for some other purpose) may wish to change this (or not run it).
+
+```{r, fig.show='hold', fig.cap="True growth trajectory (line) and randomly generated length-at-age observations (points)."}
+N <- 6 # how many samples per age bin
+set.seed(2017)
+data <- NULL
+for(i in 1:max(ages))
+{
+  sizes <- abs(rnorm(N,biphasic[i],biphasic[i]*cv))
+  mature <- ifelse(i<Tmat,rep(0,N),rep(1,N))
+  size_age <- cbind(rep(i,N),sizes,mature)
+  data <- rbind(data,size_age)
+}
+colnames(data) <- c("Age","Length","Mature")
+data <- as.data.frame(data) # treat this as a data frame where 'age' is known with certainty
+Data <- data
+head(Data,10)  
+
+plot(Data$Age,Data$Length,pch=21,bg="grey50",xlab="Age (yrs)", ylab="Length (mm)")
+lines(ages,biphasic,lty=2,lwd=3,col="red")
+```
+  
+#Statistical analysis
+
+We now subset the data into two datasets: (1) the immature fish and (2) the mature fish. The goal is to evaluate a direct interpretation of the Lester Growth Model which is: (1) linear growth for the late-stage juveniles and (2) nonlinear, asymptotic growth for mature fish that is von Bertalanffy in shape due to investment into reproduction. We fit the linear model using `lm()` (or some variant) and the asymptotic model using `nls()` (nonlinear least squares). The important part for the `nls()` adult growth estimation is that we use the life-history parameters estimated from the juvenile phase (which have information on the shape of the adult phase) and treat them as fixed and known with certainty, then estimate the parameter *g* (the cost of reproduction) as the only remaining free variable.
+
+```{r}
+Immature=subset(Data,Data$Mature==0) #subset immature
+Mature=subset(Data,Data$Mature==1) #subset mature
+
+T=Tmat
+```
+
+Now call `lm()` to create the linear model for late-stage juveniles individuals
+
+```{r, fig.cap="Linear model fitted to juvenile length-at-age data", fig.show='hold'}
+lmImmature=lm(Length~Age,data=Immature) #create a linear model for immature individuals
+summary(lmImmature)
+coef(lmImmature)
+h=lmImmature[[1]][[2]] #identify h (immature growth rate)
+t1=lmImmature[[1]][[1]]/-h #identify t1(x-int from regression)
+plot(Immature$Age,Immature$Length,ylab="Length",xlab="Age",pch=21,bg="green")
+abline(lmImmature)
+```
+
+  
+#Describe and fit the Lester Growth Model to mature individuals as per @Moe2015
+
+We use `nls()` to estimate the nonlinear adult growth. We try to use reasonable estimates of g (*warning* you may have to try a few estimates depending on the life history of the fish, as not all values of *g* are reasonable see our text in @WilsonInReview).
+```{r}
+Lester=Length~((3*h)/g)*(1-exp(-(log(1+(g/3)))*(Age-(T+(log(1-((g*(T-t1))/3))/log(1+(g/3))))))) 
+#Because age at maturity and immature growth parameters are know, the only parameter estimated is reproductive investment (g)
+fitLester=nls(Lester,data=Mature,start=list(g=0.01)) #fit the biphasic model to the subsetted mature fish
+summary(fitLester)
+```
+
+Graph the data using `predict()` functions to create a smooth curve. Note that `predict()` only works if the models above identify the data to be used by using the code "data=......" rather than identifying data using \$ (ex., `Length$Data~Age$Data`). We add the predictions for the juvenile phase and the adult phase seperately.
+
+```{r, fig.cap="Observed (points) and predicted (lines) length-at-age for population of interest.", fig.show="hold"}
+seqImm=seq(min(Immature$Age),T,by=0.001) 
+#create a sequence of lengths ranging from min to max length of immature individuals (x-values)
+pred1=predict(lmImmature,newdata=data.frame(Age=seqImm)) 
+#use the 'lmImmature' model to predict y values for the new immature length sequence (y-values)
+seqMat=seq(T,max(Mature$Age),by=0.001) 
+#create a sequence of lengths ranging from min to max length of mature individuals (x-values)
+pred2=predict(fitLester,newdata=data.frame(Age=seqMat)) 
+#use the 'fitLester' glm to predict y values for the new mature length sequence (y-values)
+plot(Length~Age,data=Data,xlab="Age",ylab="Length",pch=21,bg=ifelse(Data$Mature==0,"red","black")) 
+#plot the data using min and max values of the data sets to set up the axes (ylim & xlim)
+lines(seqImm,pred1,lwd=1.75) #add the regression for immature individuals using the seqImm and pred1 you created
+lines(seqMat,pred2,lwd=1.75) #add the regression for mature individuals using the seqMat and pred2 you created
+```
+
+#Confidence intervals
+We can use diagnostics or interact with the model objects returned from `lm()` and `nls()` to inspect the fit of the models, or to generate confidence intervals in our parameter estimates. 
+
+```{r}
+UI <- c(h,t1) + 1.96*as.vector(coef(summary(lmImmature))[, "Std. Error"])
+LI <- c(h,t1) - 1.96*as.vector(coef(summary(lmImmature))[, "Std. Error"])
+UIg <- as.vector(coef(fitLester)) + 1.96*as.vector(coef(summary(fitLester))[, "Std. Error"])
+LIg <- as.vector(coef(fitLester)) - 1.96*as.vector(coef(summary(fitLester))[, "Std. Error"])
+UI <- c(UI,UIg)
+LI <- c(LI,LIg)
+CI <- data.frame("Lower 95% CI"=LI,"Upper 95% CI"=UI)
+row.names(CI) <- c("h","t1","g")
+CI
+```
+  
+  
+We do some further diagnostics of the model by evaluating how biased the estimates of the growth parameters were in comparison to the true parameters we used to simulate the fake data. To do this we use percent bias: $$Bias = ((L_i - \hat{L_i})/L_i) * 100$$  
+
+
+```{r}
+par.true <- c(h.true,t1.true,g.true)
+plot((c(h,t1,coef(fitLester)[1])-par.true)/par.true*100,
+     xlab="Lester Model Parameters",xaxt='n',
+     ylab="Percent Bias",
+     ylim=range((c(UI,LI)-par.true)/par.true*100),pch=21,bg="grey50")
+
+segments(x0=1:4,x1=1:4,y0=(LI-par.true)/par.true*100,
+         y1=(UI-par.true)/par.true*100,
+         lty=2,col="black")
+
+axis(1,at=1:3,labels=c("h","t1","g"))
+abline(h=0,lty=2,col="red")
+```
+
+Interestingly, most of the bias goes into $t_1$, while both $h$ and $g$ are estimated reasonably well (see comments in @WilsonInReview). Lastly, we visualize  standardized residuals for both the juvenile and adult model phases. The residuals appear normally distributed suggesting no systemic bias in the model fitting and the assumptions of normality for the statistical models are met.  
+
+```{r}
+layout(matrix(1:2,nrow=1,ncol=2))
+plot(Immature$Age,residuals(lmImmature)/Immature$Length,xlim=c(0,max(ages)),pch=21,bg="red",
+     ylab="Standardized residuals",xlab="Age")
+points(Mature$Age,residuals(fitLester)/Mature$Length,pch=21,bg="black")
+
+hist(c(residuals(lmImmature)/Immature$Length,residuals(fitLester)/Mature$Length),main='',xlab="Standardized residuals",col="steelblue")
+abline(v=0,lwd=3,col="red")
+```
+
+
+## References
+```{r references, echo=FALSE, message=FALSE}
+write.bibtex(file="Appendix_A_references.bib")
+```
