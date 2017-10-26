@@ -1,0 +1,248 @@
+---
+title: |
+  | Appendix C:
+  | Fitting the Lester biphasic growth model without maturity data using a penalized likelihood approach
+author: |
+  | Kyle Wilson$^1$ and Andrew Honsey$^2$
+  | $^1$The University of Calgary
+  | $^2$University of Minnesota
+date: "June 26, 2017"
+output:
+  html_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_C_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+  pdf_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_C_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+fig_height: 6
+fig_width: 7
+fontsize: 11pt
+geometry: margin=1in
+highlight: tango
+fig_caption: yes
+references:
+- DOI: null
+  URL: null
+  author:
+  - family: Wilson
+    given: K. L.
+  - family: Honsey
+    given: A.
+  - family: Moe
+    given: B.
+  - family: Venturelli
+    given: P.
+  container-title: Methods in Ecology and Evolution
+  id: WilsonInReview
+  issue: null
+  issued: 2017
+  language: en-GB
+  page: null
+  title: 'Growing the biphasic framework: techniques and recommendations for fitting
+    emerging growth models'
+  title-short: Growing the biphasic framework
+  type: article-journal
+  volume: In Review
+df_print: kable
+---
+
+```{r setup, include=FALSE, cache=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE)
+opts_chunk$set(tidy=TRUE)
+opts_chunk$set(fig.show = "hold", collapse=TRUE)
+#library(devtools)
+#install.packages("knitcitations")
+library(knitcitations)
+cleanbib()
+options("citation_format" = "pandoc")
+```
+This appendix is in support of the main manuscript in @WilsonInReview. The citation style language (csl) used herein is the methods-in-ecology-and-evolution.csl file which can be downloaded from https://github.com/citation-style-language/styles/blob/master/methods-in-ecology-and-evolution.csl and placed in the same directory as this .rmd file.
+
+
+<br>
+
+The following code is an example application of the Lester biphasic growth model `r citep("10.1098/rspb.2004.2778")` to length-at-age data in the absence of any information on maturity (e.g., maturity data, *a priori* estimates of age-at-maturity, etc.). In this case, the age-at-maturity parameter $T$ is estimated simultaneously with the other model parameters using a penalized likelihood approach. 
+
+### Data generation
+
+First, we generate realistic length-at-age data with a known value for age-at-maturity. The age range of the fishes were read in as a vector of integers. True somatic growth rate can be any positive number and represents the length (in mm) accumulated per year in the late-stage juvenile phase. The variable $t_1$ represents the hypothetical age at length 0 (i.e., the *x*-intercept for the juvenile phase). We use a reasonable value for the coefficient of variation in length-at-age ($cv$) of 15%, a typical observation among most fishes (see review in `r citet("10.1016/j.fishres.2016.01.006")`). The variable $T$ (or Tmat in the R code below) represents the age-at-maturity for the population. The parameter $g$ represents the proportion of energy in the adult phase allocated to reproduction per unit time (in this case, per year). Note that $g$ must be positive and has an intrinsic maximum such that: $$ g \sim \{0,3/(T-t_1)\}. $$
+
+In this case, we put the true $g$ value at the halfway point between $0$ and $3/(T-t_1)$.
+
+
+```{r}
+ages <- 1:50
+Tmat <- 15 # age at maturity
+h <- 45 # somatic growth in millimeters per year
+t1 <- -0.2 #age when size=0 for the juvenile phase
+g <- 0.5*(3/(Tmat-t1)) # proportion of energy in adult phase allocated to reproduction per year
+cv <- 0.15 # coefficient of variation in size-at-age
+```
+
+<br>
+
+Next, we convert the Lester parameters to von Bertalanffy parameters, which describe the asymptotic growth of the adult phase. We then calculate the 'true' length-at-age for both phases of growth using the parameters specified above. We use an if-else statement to select which 'true' length-at-age value applies for each age, given the estimate of age-at-maturity. We then generate a plot of the lifetime growth trajectory, including the entire trajectories for both phases and the point at which growth transitions from the first to the second phase (i.e., age-at-maturity).
+
+
+```{r plot1_code, echo = TRUE, fig.show="hold",fig.cap="Somatic growth occurs in two phases: juvenile and adult. Red dashed lines indicate the age- and length-at-maturity. Dashed grey line indicates juvenile growth (including if juveniles never matured). Solid grey line indicates adult asymptotic growth (including if individuals were born mature and were investing into reproduction from hatch/birth). Black dash line indicates the composite growth trajectory of the two phases."}
+linf <- 3*h/g # conversion for the VBGF L-infinity
+vbk <- log(1+g/3) # conversion for the VBGF parameter kappa
+t0 <- Tmat + log(1-g*(Tmat-t1)/3)/log(1+g/3) #conversion for the VBGF parameter t0
+
+lena_phase1 <- h*(ages-t1) # length-at-age for phase 1
+lena_phase2 <- linf*(1-exp(-vbk*(ages-t0))) # length-at-age for phase 2
+biphasic <- ifelse(ages<Tmat,lena_phase1,lena_phase2) #if-else statement for which phase a fish is allocating surplus energy
+
+
+# generate plot of growth trajectory
+plot(ages,lena_phase1, ylab="Size", xlab="Age",lty=3,type="l",col="grey50",lwd=3)
+lines(ages,lena_phase2,col="grey50",lwd=3)
+lines(ages,biphasic,lty=2,lwd=3)
+segments(x0=Tmat,x1=Tmat,y0=0,y1=h*Tmat+t1,col='red',lty=2) #plot where maturity occurs
+segments(x0=0,x1=Tmat,y0=h*Tmat+t1,y1=h*Tmat+t1,col='red',lty=2) #plot where maturity occurs
+points(Tmat,h*Tmat+t1,pch=21,bg="grey50",cex=1.5)
+
+```
+
+
+
+<br>
+
+Next, we generate data using `rnorm()`. We specify how many individuals will be sampled per age bin, and incorporate the coefficient of variation specified above. We compile the length-at-age data into a data frame object. We set the seed for the random number generator to make our results repeatable: `set.seed(2017)`. However, those that wish to bootstrap this approach (or alter the code for some other purpose) may wish to remove this command.
+
+```{r}
+set.seed(2017)
+N <- 15 # how many samples per age bin
+data <- NULL
+for(i in 1:max(ages))
+{
+  sizes <- rnorm(N,biphasic[i],biphasic[i]*cv)
+  
+  size_age <- cbind(rep(i,N),sizes)
+  data <- rbind(data,size_age)
+}
+colnames(data) <- c("Age","Size") # add column names
+data <- as.data.frame(data) # convert to data frame
+plot(data$Age,data$Size,xlab="Age",ylab="Size") # plot data
+points(ages,biphasic,pch=20,col='red') # add 'true' growth trajectory points (in red)
+```
+
+
+<br>
+
+### Likelihood function
+Next, we specify the likelihood function. We estimate five parameters: $T$, $h$, $t_1$, $g$, and the $cv$ in length-at-age. We provide conversions for the von Bertalanffy (mature) growth parameters, and we use an if-else statement to differentiate between immature and mature growth. Finally, we used a penalized likelihood to help ensure that estimates of $g$ do not venture outside of analytical bounds (see Lester et al. 2004).
+
+```{r}
+## likelihood function
+
+nll <- function(theta)
+{
+  h <- theta[1]
+  t1 <- theta[2]
+  g <- exp(theta[3])
+  size.cv <- theta[4]
+  T_pred <- theta[5]
+
+  ## Convert to phase 2 VBGF parameters
+  linf <- 3*h/g
+  vbk <- log(1+g/3)
+  t0 <- Tmat + log(1-g*(T_pred-t1)/3)/log(1+g/3)
+  
+ 
+  ## Make predictions 
+  pred1 <- h*(data$Age-t1) #predicted length for phase 1
+  pred2 <- linf*(1-exp(-vbk*(data$Age-t0))) #predicted length for phase 2
+  pred_all <- ifelse(data$Age<T_pred,pred1,pred2) #discontinuous maturity breakpoint
+  #points(data$Age,pred_all,col='red')
+  ll <- dnorm(data$Size,mean=pred_all,sd=pred_all*size.cv,log=TRUE) #normal likelihood with constant variance
+  if(g<0|g>(3/(T_pred-t1))){
+    nll <- 1e6 # penalized likelihood when g goes past bounds given in Lester et al. 2004; g must be > 0 OR < 3/(T-t1)
+  }else{
+    nll <- -sum(ll) # return the negative log-likelihood 
+  }
+  return(nll)
+}
+```
+
+<br>
+
+### Optimization and visualization of results
+To fit the model, we first provide and compile starting values for each parameter. We then use the `optim()` function to optimize the likelihood function for our list of parameters. As mentioned above, we estimate $T$ (Tmat), $t_1$, $h$, $g$, and $cv$ (error term). If desired, one can easily calculate Akaike's information criterion (AIC) for post-hoc model comparisons. The remainder of the code below provides guidelines for extracting and plotting results -- see comments for details.
+
+
+```{r, warning=F,message=F}
+## starting values
+h.hat <- 35 
+t1.hat <- -1
+g.hat <- log(0.2)
+cv.hat <- 0.1
+T.hat <- 10
+theta <- c(h.hat,t1.hat,g.hat,cv.hat,T.hat) # initial parameter estimates
+
+## optimization
+fit <- optim(theta,nll,method='Nelder-Mead',control=list(maxit=1e5,reltol=1e-10),hessian=TRUE)
+
+## AIC calculation
+AIC <- 2*length(fit$par) - 2*(-fit$value)
+
+
+## plot estimates with 95% asymptotically normal confidence intervals (CI)
+
+h_pred <- fit$par[1] # extract h estimate
+t1_pred <- fit$par[2] # extract t1 estimate
+g_pred <- exp(fit$par[3]) # extract and back-transform g estimate
+cv_pred <- fit$par[4] # extract cv estimate
+T_pred <- fit$par[5] # extract T estimate
+par.hat <- c(h_pred,t1_pred,log(g_pred),cv_pred,T_pred) # compile parameter estimates
+par.true <- c(h,t1,log(g),cv,Tmat) # compile 'true' parameter values
+fisher_info <- solve(fit$hessian) # take the inverse of the hessian to get the variance-covariance matrix
+SE.par <- sqrt(diag(fisher_info)) #square-root the variance-covariance matrix to get standard errors
+
+UI <- par.hat+1.96*SE.par # upper bounds of 95% CIs
+LI <- par.hat-1.96*SE.par # lower bounds of 95% CIs
+
+## generate plot of percent bias in parameter estimates
+plot(1:5,((par.hat-par.true)/par.true)*100,
+     ylim=range((((c(LI,UI)-par.true)/par.true)*100)),
+     xaxt='n',ylab='Percent bias',xlab="Lester model parameters")
+segments(x0=1:5,x1=1:5,y0=((LI-par.true)/par.true)*100,y1=((UI-par.true)/par.true)*100,lty=2,col="black")
+axis(1,at=1:5,labels=c("h","t1","ln(g)","cv","T"))
+abline(h=0,lty=3,col='red')
+
+
+## Plot 'true' vs. estimated growth trajectory
+
+# make conversions to phase 2 VBGF parameters
+
+linf.hat <- 3*h_pred/g_pred
+vbk.hat <- log(1+g_pred/3)
+t0.hat <- Tmat + log(1-g_pred*(T_pred-t1_pred)/3)/log(1+g_pred/3)
+
+pred.phase1 <- h_pred*(ages-t1_pred) # predicted growth in phase 1
+pred.phase2 <- linf.hat*(1-exp(-vbk.hat*(ages-t0))) # predicted growth in phase 2
+pred_all <- ifelse(ages<T_pred,pred.phase1,pred.phase2) # all predictions, similar to likelihood function
+
+
+# generate plot
+plot(ages,biphasic,type='l',xlab="Age (yr)",ylab="Size (mm)",
+     lwd=3,lty=4)
+lines(ages,pred_all,col='grey50',lty=2,lwd=3)
+legend("bottomright",legend=c("True","Estimated"),
+       col=c("black","grey50"),
+       lty=c(4,2),lwd=2)
+```
+
+The top panel shows the percent bias for the five estimated parameters, compared to the 'true' values. In this case, the estimates are very slightly biased in a couple of cases (likely due to sampling around the 'true' parameter values), and the confidence interval is rather large for $t_1$. The lower panel displays the estimated growth trajectory (gray, dashed line) compared to the 'true' growth trajectory (black, dot-dashed line).
+
+## References
+```{r references, echo=FALSE, message=FALSE}
+write.bibtex(file="Appendix_C_references.bib")
+```
