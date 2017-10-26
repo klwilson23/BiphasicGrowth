@@ -1,0 +1,720 @@
+---
+title: |
+  | Appendix F:
+  | Realistic simulation and comparison of three approaches to fitting biphasic growth models
+author: |
+  | Kyle L Wilson
+  | The University of Calgary
+date: "October 5, 2017"
+output:
+  html_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_F_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+  fig_caption: yes
+  fig_height: 10
+  fig_width: 10
+  fontsize: 11pt
+  highlight: tango
+  df_print: kable
+  pdf_document:
+    pandoc_args:
+    - --biblio
+    - Appendix_F_references.bib
+    - --csl
+    - methods-in-ecology-and-evolution.csl
+references:
+- DOI: null
+  URL: null
+  author:
+  - family: Wilson
+    given: K. L.
+  - family: Honsey
+    given: A.
+  - family: Moe
+    given: B.
+  - family: Venturelli
+    given: P.
+  container-title: Methods in Ecology and Evolution
+  id: WilsonInReview
+  issue: null
+  issued: 2017
+  language: en-GB
+  page: null
+  title: 'Growing the biphasic framework: techniques and recommendations for fitting
+    emerging growth models'
+  title-short: Growing the biphasic framework
+  type: article-journal
+  volume: In Review
+- DOI: null
+  URL: null
+  author:
+  - family: Gelman
+    given: A.
+  - family: Carlin
+    given: J.
+  - family: Stern
+    given: H.
+  - family: Dunson
+    given: D.
+  - family: Vehtari
+    given: A.
+  - family: Rubin
+    given: D.
+  edition: 3
+  id: Gelman2013
+  issue: null
+  issued: 2013
+  language: en-GB
+  location: Boca Raton, FL
+  page: null
+  publisher: Chapman and Hall/CRC Press
+  title: Bayesian Data Analysis
+  title-short: BDA3
+  type: book
+  volume: null
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE)
+opts_chunk$set(tidy=TRUE)
+opts_chunk$set(fig.show = "hold", collapse=TRUE)
+#library(devtools)
+#install.packages("knitcitations")
+library(knitcitations)
+cleanbib()
+options("citation_format" = "pandoc")
+```
+
+This appendix is in support of @WilsonInReview. The citation style language (csl) used herein is the methods-in-ecology-and-evolution.csl file which can be downloaded from https://github.com/citation-style-language/styles/blob/master/methods-in-ecology-and-evolution.csl and placed in the same directory as this .rmd file.
+
+## Summary description of objectives:  
+
+The following script simulates 3 different statistical approaches for fitting the Lester biphasic model where the breakpoint (age-at-maturity) is treated as unknown prior to model estimation `r citep("10.1098/rspb.2004.2778")`. We use three different sets of initial parameter values to evaluate the sensitivity of each approach to starting values. We then compare the performance of each approach using percent bias: $$Bias = ((\theta_i - \hat{\theta_i})/\theta_i) * 100$$ 
+
+where $theta_i$ is one of the estimated parameters (e.g., $h$) for a given approach and set of starting values.
+
+## Global functions
+
+We will first define some global functions that will be used below.
+
+```{r used_Functions}
+
+Corner_text <- function(text, location="topright") #function to write text to the corner of plots
+{
+  legend(location,legend=text, bty ="n", pch=NA)
+}
+
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...) #function to change size of text in the pairs plots to match the size of the correlation
+{
+  usr <- par("usr"); on.exit(par(usr))
+  par(usr = c(0, 1, 0, 1))
+  r <- abs(cor(x, y))
+  txt <- format(c(r, 0.123456789), digits = digits)[1]
+  txt <- paste0(prefix, txt)
+  if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+  text(0.5, 0.5, txt, cex = cex.cor * r)
+}
+
+biphasicPlot <- function(h=h,g=g,t1=t1,Tmat=Tmat) #function to return the biphasic growth trajectory for a given set of parameters
+{
+  LT_ages <- ages
+  juv <- h*(LT_ages-t1)
+  adult <- (3*h/g)*(1-exp(-(log(1+g/3))*(LT_ages-(Tmat+log(1-g*(Tmat-t1)/3)/log(1+g/3)))))
+  pred <- ifelse(LT_ages<=Tmat,juv,adult)
+  return(pred)
+}
+
+```
+
+First, we must load the required libraries and specify the simulated 'true' life history parameter values. We will set the coefficient of variation in length-at-age at 20%, a little larger than typically observed for fisheries data (see review in `r citet("10.1016/j.fishres.2016.01.006")`).
+
+```{r trueParameters}
+library(boot) # use install.packages('boot') if package isn't already installed
+library(runjags) #load, install, or require the 'runjags' library
+library(rjags)
+library(stats4) #load the 'stats4' library
+library(coda)
+
+ages <- 1:30 #create an integer sequence of ages
+
+Tmat <- 4 # age of maturity
+h <- 50 # somatic growth in millimeters per year
+t1 <- -0.2 #age when size=0 for the juvenile phase
+M <- 0.25 #Natural mortality for the population
+g <- 1.18*(1-exp(-M)) # proportion of energy in adult phase allocated to reproduction per year
+cv <- 0.2 # coefficient of variation in size-at-age
+linf = 3*h/g ## von Bertalanffy asymptotic length (mm)
+vbk= log(1 + g/3) ## Brody growth coefficient (per yr)
+t0 = Tmat + suppressWarnings(log(1-(g*(Tmat-t1)/3)))/log(1+g/3) ## von Bertalanffy hypothetical age at length 0 (yr)
+
+Nfish <- 100 # how many fish in total do you have?
+
+lena_phase1 <- h*(ages-t1) # length-at-age for phase 1
+lena_phase2 <- linf*(1-exp(-vbk*(ages-t0))) # length-at-age for phase 2
+biphasic <- ifelse(ages<=Tmat,lena_phase1,lena_phase2) #if-else statement for which phase a fish is allocating surplus energy
+
+```
+
+Next, we will calculate survivorship-at-age $l_a$, which is the expected discrete annual survival based on constant mortality $M$ calculated from a reference age, for the 30 ages (length of the vector `ages`). In this case $l_1=1$ and for every age $a>=2$:
+
+$$l_a= l_{a-1}*e^{-M}$$.
+
+We also induce selectivity-at-age $s_a$ in the sampling process with the equation $$s_a=1/(1+e^{slope*(a-a_\text{50})}$$.
+
+```{r Survivorship}
+surv <- rep(NA,length(ages)) # create an empty vector
+surv[1] <- 1;for(i in 2:max(ages)){surv[i]<-surv[i-1]*exp(-M)} #survivorship from discrte annual survival
+gearA50 <- Tmat # induce a gear selectivity that inflects at A50
+gearSlope <- -0.4 # whats the slope of selectivity
+select <- 1/(1+exp(gearSlope*(ages-gearA50))) # the average selectivity curve
+```
+
+Next, we will generate data using a random normal distribution (realized parameter values and model fit quality will change due to randomness) using the `rnorm()` function. Sample sizes expected for each age are realistic for fisheries data and are determined using a function of gear selectivity and survivorship arising from a multinomial process using the `rmultinom()` function. The expected probability of sampling fish of a particular age class will be $l_a*s_a$. Alternatively, we could have read in our data with, for example, a .csv file replacing the `Data` object.
+
+```{r DataGeneration}
+SampSize <- 10000
+set.seed(2016)
+maxSamp <- as.vector(rmultinom(1,prob=surv*select,size=SampSize)) # whats the maximum number of observable samples for an age group in a population? 
+mean.samp <- as.data.frame(cbind(biphasic,maxSamp)) #make matrix of mean lengths-at-age and sample sizes
+mlen <- rep(mean.samp[,1],mean.samp[,2]) #repeat each mean "sample size" number of times
+ageData <- rep(ages,mean.samp[,2]) #repeat each age "sample size" number of times
+lengths <- sapply(mlen,function(x) rnorm(1,mean=x,sd=x*cv)) #generate random normal length data using means & cv error
+Data <- as.data.frame(cbind(ageData,lengths)) #bind vectors into age and length matrix, covert to data frame
+colnames(Data) <- c("Age","Size") # re-name the columns
+Data <- Data[sample(nrow(Data),size=Nfish,replace=F),] #draw a random sample from the population -- total sample size can be adjusted with the Nfish parameter
+
+```
+
+Here is how our data look currently with the expected samples-at-age from the multinomial process.
+
+```{r SamplingProcess}
+layout(matrix(c(1,2),nrow=2,ncol=1))
+par(mar=c(4,4,1,1))
+plot(ages,surv,ylab="Probability",xlab="Age",type="l",lty=2,col="blue",lwd=2)
+lines(ages,select,lty=2,col="orangered",lwd=2)
+lines(ages,surv*select,lty=1,lwd=2)
+legend("right",c("Survivorship","Selectivity","Sampled"),
+       lty=c(2,2,1),col=c("blue","orangered","black"),lwd=3)
+
+plot(Data$Age,Data$Size, ylab="Length (mm)",xlab="Age (yrs)") ## plot length-at-age
+lines(ages,biphasic,lty=2,col="blue")
+```
+
+## Approach 1 - Penalized likelihood
+
+The next step is to duplicate what we did in Appendix C, where we specify the likelihood function. We estimate five parameters: $T$, $h$, $t_1$, $g$, and the $cv$ in length-at-age. We provide conversions for the von Bertalanffy (mature) growth parameters, and we use an if-else statement to differentiate between immature and mature growth. Finally, we use a penalized likelihood to help ensure that estimates of $g$ do not venture outside of analytical bounds (see @Lester_2004).
+
+```{r LikelihoodFunction}
+nll <- function(theta)
+{
+  h <- theta[1]
+  t1 <- theta[2]
+  g <- inv.logit(theta[3])
+  size.cv <- theta[4]
+  T_pred <- theta[5]
+  ########################################################
+  ## make conversions to phase 2 VBGF parameters #########
+  ########################################################
+  linf <- 3*h/g
+  vbk <- log(1+g/3)
+  t0 <- Tmat + log(1-g*(T_pred-t1)/3)/log(1+g/3)
+  
+  ########################################################
+  ## Make predictions to the data ########################
+  ########################################################
+  
+  pred1 <- h*(Data$Age-t1) #predicted length for phase 1
+  pred2 <- linf*(1-exp(-vbk*(Data$Age-t0))) #predicted length for phase 2
+  pred_all <- ifelse(Data$Age<=T_pred,pred1,pred2) #discontinuous maturity breakpoint
+  ll <- dnorm(Data$Size,mean=pred_all,sd=pred_all*size.cv,log=TRUE) #normal likelihood with constant cv across ages
+  if((g<0)|(g>(3/(T_pred-t1)))){
+    nll <- 1e6 # penalized likelihood when g goes past bounds given in Lester et al. 2004; g must be > 0 OR < 3/(T-t1)
+  }else{
+    nll <- -sum(ll) # return the negative log-likelihood 
+  }
+  return(nll)
+}
+```
+
+### Optimization and visualization of results
+To fit the model, we first provide and compile starting values for each parameter. We then use the `optim()` function to optimize the likelihood function for our list of parameters.
+
+In this case, we use three different starting value vectors to evaluate the sensitivity of each approach to starting values.
+
+```{r Optimixation, warning=F,message=F}
+h.hat <- 35 # the following are initial parameter estimates
+t1.hat <- -3
+g.hat <- logit(0.07)
+cv.hat <- 0.1
+T.hat <- 11.5
+theta <- c(h.hat,t1.hat,g.hat,cv.hat,T.hat) # initial parameter estimates vector 1
+theta2 <- c(h.hat*1.5,t1.hat*0.5,g.hat*2,cv.hat*1.5,T.hat*0.75) # initial parameter estimates vector 3
+theta3 <- c(h.hat*2,t1.hat*0.2,g.hat*3,cv.hat*2,T.hat*0.5) # initial parameter estimates vector 2
+
+par.true <- c(h,t1,g,cv,Tmat)
+
+fit <- optim(theta,nll,method='BFGS',control=list(fnscale=1,maxit=1e5,reltol=1e-10),hessian=TRUE)
+fit2 <- optim(theta2,nll,method='BFGS',control=list(fnscale=1,maxit=1e5,reltol=1e-10),hessian=TRUE)
+fit3 <- optim(theta3,nll,method='BFGS',control=list(fnscale=1,maxit=1e5,reltol=1e-10),hessian=TRUE)
+
+```
+
+We then create a function that stores the maximum likelihood estimates and 95% asymptotically normal CI from a Hessian matrix.
+
+
+```{r, message=FALSE}
+optimFits <- function(x)
+{
+  par.hats <- x$par
+  par.hats[3] <- inv.logit(par.hats[3]) # return the g parameter in normal space from logit
+  fisher_info <- solve(x$hessian) #take the inverse of the hessian to get the var-covar matrix
+  prop_sigma <- sqrt(diag(fisher_info)) #square-root the var-covar matrix to get sigmas (i.e., standard errors)
+  SE.par <- prop_sigma
+  UI <- par.hats+1.96*SE.par
+  LI <- par.hats-1.96*SE.par
+  perBias <- ((par.hats-par.true)/par.true)*100
+  LIBias <- ((LI-par.true)/par.true)*100
+  UIBias <- ((UI-par.true)/par.true)*100
+  return(list(mn.95=rbind(par.hats,UI,LI),bias=rbind(perBias,UIBias,LIBias)))
+}
+m1 <- optimFits(fit)
+m2 <- optimFits(fit2)
+m3 <- optimFits(fit3)
+
+approach1 <- list(m1,m2,m3) #Store the results of approach 1 for plotting later
+
+```
+
+## Approach 2 - Likelihood profiling
+
+In this case, we will use the profile likelihood approach (`r citep("10.1002/eap.1421")`) See Appendix D for details.
+
+```{r ProfilingFunction, warning=F, message=FALSE}
+Biphas.Lik.MA = function(parms) { 
+  # list parameters
+  h1 <- parms[1]
+  b0 <- parms[2]
+  g <- inv.logit(parms[3])   
+  cv <- parms[4] 
+  age.i <- Data$Age[Data$Age<=mat.age] ## define immature ages
+  len.i <- Data$Size[Data$Age<=mat.age] ## define immature lengths
+  age.m <- Data$Age[Data$Age>mat.age] ## define mature ages
+  len.m <- Data$Size[Data$Age>mat.age] ## define mature lengths
+  
+  ## Lester model equations
+  t1 <- -b0/h1
+  Linf <- 3*h1/g
+  k <- log(1 + g/3)
+  t0 <- mat.age + 
+    suppressWarnings(log(1-(g*(mat.age-t1)/3)))/log(1+g/3)                                  
+  mn.i <- b0 + h1*age.i
+  mn.m <- Linf*(1-exp(-k*(age.m-t0)))
+  
+  ## Likelihoods
+  b0.lik <- dnorm(b0,mean=b0est,sd=25,log=T) #optional (also, distribution can be adjusted if needed)
+  h1.lik <- dnorm(h1,mean=h1est,sd=5, log=T) #optional (also, distribution can be adjusted if needed)
+  L.i <- dnorm(len.i,mean=mn.i,sd=mn.i*cv,log=T)
+  L.m <- dnorm(len.m,mean=mn.m,sd=mn.m*cv,log=T)
+  ll <- sum(c(L.i,L.m)) #without likelihood priors
+  jll <- sum(c(L.i,L.m, b0.lik,h1.lik)) # with likelihood priors
+  return(ll)
+}
+```
+
+Below, we specify the three starting value vectors.
+
+```{r StartingList, warning=F, message=FALSE}
+immdata<- Data[ which(Data$Age <= (min(Data$Age)+3)), ] #choose data within first four ages -- number of ages can be changed
+immout<-lm(Size~Age, data=immdata) #linear regression on "immature" data -- change formulation as needed to match your data column names
+b0est<-immout$coefficients[[1]] # store intercept estimate, used for prior likelihood
+h1est<-immout$coefficients[[2]] # store slope estimate, used for prior likelihood
+t1est <- -b0est/h1est
+parms1 <- theta[-5]  #compile parameters
+parms2 <- theta2[-5] # initial parameter estimates
+parms3 <- theta3[-5] # initial parameter estimates
+parms <- rbind(parms1,parms2,parms3)
+parms[,2] <- -parms[,1]*parms[,2]
+```
+
+Next, we make empty dataframes for storing the parameter estimates, and we generate a sequence of potential age-at-maturity values for profiling.
+
+```{r, warning=F, message=FALSE}
+Mat.age <- seq(2,max(ages),by=0.025) #  range of mat.age values for profile likelihood calculation -- adjust as needed
+lik<-b0.mat<-h.mat<-g.mat<-cv.mat<-rep(NA,length(Mat.age)) # create empty vectors for parameters
+mat.age.df <- cbind(Mat.age,lik,h.mat,b0.mat,g.mat,cv.mat) # create matrix for storing parameter estimates
+
+mat.age.Lik <- array(mat.age.df,dim=c(dim(mat.age.df),3))
+
+```
+
+We then optimize the likelihood function for each potential age-at-maturity value and store both parameter estimates and full-model likelihoods.
+
+```{r profileOptimizaton, warning=F, message=FALSE}
+for(i in 1:3) #loop over 3 times for different starting vectors
+{
+  for(j in 1:length(Mat.age))
+  {
+    mat.age = Mat.age[j] # fix age-at-maturity at a given value
+    L.out = try(optim(par=parms[i,],fn=Biphas.Lik.MA,
+                      control=list(fnscale=-1,reltol=1e-8)), silent=T) # optimize likelihood function
+    check<-is.numeric(L.out[[1]]) # check to see if model converged
+    
+    ## store values only if model converged
+    if (check[[1]] == "TRUE"){
+      
+      #Store parameter values (back-transform g)
+      mat.age.Lik[j,2,i] <- L.out$value
+      mat.age.Lik[j,3,i] <- L.out$par[[1]]
+      mat.age.Lik[j,4,i] <- L.out$par[[2]]
+      mat.age.Lik[j,5,i] <- inv.logit(L.out$par[[3]])
+      mat.age.Lik[j,6,i] <- L.out$par[[4]]
+    }
+  }
+  XX <- as.data.frame(mat.age.Lik[,,i])
+  colnames(XX) <- c("Mat.age","lik","h.mat","b0.mat","g.mat","cv.mat")
+  assign(paste("mat.age.df",i,sep=""),XX)
+}
+```
+
+Next, we find the maximum likelihood estimate for $T$ (and the remaining parameters) from the profiling procedure.
+
+```{r findMLE, message=FALSE}
+findMLE <- function(x){
+  x1 <- x[which(x$lik != "NA"),] #remove failed runs
+  mle <- max(x1$lik,na.rm=TRUE) ## find maximum likelihood
+  MLE <- x1[which(x1$lik == mle),] ## maximum likelihood estimates for all parameters
+  ## Confidence interval in terms of chi-squared (~ 95% CI)
+  ndx1 = which(x1$lik>(mle-1.92)) # change '1.92' to 0.228 for 50% CI, 1.36 for 90% CI
+  CI = x1[ndx1,-2]
+  return(list(data=x1,best.est=MLE,mle=mle,CI95=CI)) ## print maximum likelihood estimates
+}
+
+MLE1 <- findMLE(mat.age.df1)
+MLE2 <- findMLE(mat.age.df2)
+MLE3 <- findMLE(mat.age.df3)
+
+approach2 <- list(MLE1,MLE2,MLE3) # Store the results of approach 2 for plotting later
+
+```
+
+If desired, one can calculate confidence intervals and plot the biphasic growth curves onto the data.
+
+```{r profilingPlots, message=FALSE}
+rlike1 <- exp(MLE1$data$lik-MLE1$mle)
+rlike2 <- exp(MLE2$data$lik-MLE2$mle)
+rlike3 <- exp(MLE3$data$lik-MLE3$mle)
+
+## Plot biphasic growth curves onto data
+plot(Size~Age,data=Data,xlab="Age (yr)",ylab="Length (mm)",xlim=c(0,max(Age)),ylim=c(0,max(Size)))  
+g. = MLE1$best.est[[5]]
+h1. = MLE1$best.est[[3]]
+mT = MLE1$best.est[[1]]
+b0. = MLE1$best.est[[4]]
+t1. <- -b0./h1.
+Linf. = 3*h1./g.
+k. = log(1 + g./3)
+t0. = mT + log(1-(g.*(mT-t1.)/3))/log(1+g./3)
+abline(b0.,h1.,lwd=3)  
+matX = seq(mT,max(Data$Age),length.out=25)
+matY = Linf.*(1-exp(-k.*(matX-t0.)))
+lines(matX,matY,col='red',type='l',lwd=6,lty=1)
+
+```
+
+## Approach 3 - Bayesican MCMC
+
+### Bayesian estimation
+
+The following model code is written in the JAGS language `r citep("http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.13.3406")`. The model loops through each data point and determines the contribution of the predicted length for each fish to the posterior, which is the sum of the log-likelihood and the log-prior. The predicted growth follows the analytical model from the equations in @Lester_2004. There is an if-else statement that determines if the predicted length-at-age of data point i comes from the juvenile phase or the adult phase. Modifications to this code require JAGS syntax and not R syntax.
+
+```{r JAGS model}
+model <- "model {
+
+## likelihood
+
+#loop through all data points
+for(i in 1:Nfish) {
+size[i] ~ dnorm(pred[i],1/(pred[i]*size.cv)^2)T(0,) # observed length-at-age should be normally distributed around predictions
+
+juv[i] <- h*(age[i]-t1) # predicted growth for fish i for the juvenile phase
+
+adult[i] <- (3*h/g)*(1-exp(-(log(1+g/3))*(age[i]-(Tmat+log(1-g*(Tmat-t1)/3)/log(1+g/3))))) # predicted growth for fish [i] for the adult phase
+
+pred[i] <- ifelse(age[i]<=Tmat,juv[i],adult[i]) # does the age of fish i exceed the maturity predicted for its population?
+
+} # end the calculation of the likelihood
+
+
+
+## prior distributions
+
+Tmat ~ dunif(0,max(age))
+h ~ dnorm(30,1e-3)T(0,)
+t1 ~ dnorm(0,1)
+g ~ dnorm(0.1,0.001)T(0,3/(Tmat-t1))
+size.cv ~ dgamma(0.01,0.01)
+}"
+```
+
+We then compile the data into a list for JAGS. In addition, we must provide starting values for each parameter within each chain. In this case, we use a random number generator to 'jitter' the starting values for each chain. We then compile the starting values for each chain into a list (in effect, creating a 'list of lists').
+
+
+```{r JAGSdata}
+dataPop <- Data
+data <- list(Nfish=length(Data$Age),
+             age=Data$Age,
+             size=Data$Size)
+
+inits1 <- list(h=theta[1],
+               t1=theta[2],
+               g=inv.logit(theta[3]),
+               Tmat=theta[5],
+               size.cv=theta[4]) # initial values mirroring approaches 1 and 2 starting values
+
+inits2 <- list(h=theta2[1],
+               t1=theta2[2],
+               g=inv.logit(theta2[3]),
+               Tmat=theta2[5],
+               size.cv=theta2[4])
+
+inits3 <- list(h=theta3[1],
+               t1=theta3[2],
+               g=inv.logit(theta3[3]),
+               Tmat=theta3[5],
+               size.cv=theta3[4])
+
+inits <- list(inits1,inits2,inits3) # compile all initial values into one list
+
+```
+
+Our last step before fitting the model is to provide some parameters for the JAGS MCMC algorithm. We first create the stochastic nodes to be monitored. We then store values for the thinning rate, the length of the burn-in (or warm-up) period, and the length of the adaptation period. In this case, we specify these values based on the total number of posterior draws desired for each chain.
+
+We use the `run.jags()` command `r citep(citation("runjags"))` to fit the model, and we reference the JAGS parameters as specified above. We use the `rjags` method in this case -- for larger datasets or more complicated (e.g., hierarchical) models, the `rjparallel` method may be preferred. Users may need to run `install.packages("rjags")` prior to running this portion of code.
+
+```{r RunJAGS}
+mon_names <- names(inits1) # create the stochastic nodes to be monitored
+Nsamp <- 1000 # how many posterior samples does each chain need to get, after thinning and burin-in and adaptation?
+thin_rt <- 20 # needs a decent thinning rate
+burnins <- 0.75*round(Nsamp*thin_rt,0) # how long is the burnin, this bases it on the number of total posterior draws?
+adaptin <- round(0.4*burnins,0)
+
+a <- proc.time();
+results <- run.jags(model=model, monitor=mon_names, 
+                    data=data, n.chains=3, method="rjags", inits=inits,
+                    plots=F,silent.jag=F, modules=c("bugs","glm","dic"),
+                    sample=Nsamp,adapt=adaptin,burnin=burnins,thin=thin_rt,summarise=F) # Call jags to run the model
+b <- (proc.time() - a)
+
+```
+
+Next, we will call the summary of the model fit. We can also show some diagnostic plots that evaluate whether the posterior has converged on a stable mode using the package  `coda()` `r citep(citation("coda"))`.
+
+We then show a percent bias plot that suggests that parameters for this one randomized dataset were estimated well, apart from $t_1$ (which was estimated with noise). We could repeat this trial many times to get a general idea of how well the model recovers true life-history parameters of interest (we do this in Appendix G).
+
+We next show a pairs plot to see how correlated the parameters are during the MCMC estimation. One may wish to use a multivariate normal distribution in the JAGS model above to allow for the correlations to be incorporated into the MCMC sampling `r citep("10.1016/j.ecolmodel.2004.02.013")`.
+
+
+```{r Evaluation}
+sum_results <- summary(results)
+sum_results
+
+TheRes <- as.mcmc.list(results, vars=mon_names) # this is in the 'coda' package
+TheRes1 <- as.matrix(TheRes[[1]]) ## results from starting point 1
+TheRes2 <- as.matrix(TheRes[[2]]) ## results from starting point 2
+TheRes3 <- as.matrix(TheRes[[3]]) ## results from starting point 3
+approach3 <- list(TheRes1,TheRes2,TheRes3)
+TheResTot <- as.matrix(TheRes)
+BayesTruePar <- as.vector(c(h,t1,g,Tmat,cv))
+bias1 <- t(apply(TheRes1,1,FUN=function(x){(x-BayesTruePar)/BayesTruePar*100}))
+bias2 <- t(apply(TheRes2,1,FUN=function(x){(x-BayesTruePar)/BayesTruePar*100}))
+bias3 <- t(apply(TheRes3,1,FUN=function(x){(x-BayesTruePar)/BayesTruePar*100}))
+boxplot(bias1,ylab="Percent Bias",xlab="Lester Model Parameters",col="grey50")
+
+pairs(TheResTot[,-5],lower.panel=panel.smooth,upper.panel=panel.cor) # look at the correlations between parameters
+
+```
+
+### Posterior predictive check
+
+Next, we conduct a posterior predictive check (@Gelman2013). We simulate replicated data from our fitted JAGS model (with associated uncertainty  for each estimated parameter from the model) and compare the distribution of our new *simulated* data to the *observed* data. In this case, the *observed* data is our original simulated data used in the model fitting in the `Data` object.
+
+```{r PosteriorPredictives}
+age_vec <- c(ages,rev(ages))
+# Above code creates an empty array to track size-at-age for population i for posterior draw j
+par(mfrow=c(1,1))
+par(mar=c(5,4,1,1))
+layout(matrix(1,nrow=1,ncol=1))
+for(i in 1:3)
+{
+  TheRes <- approach3[[i]]
+  post_pred <- matrix(NA, nrow=nrow(TheRes1),ncol=length(ages))
+  for(j in 1:nrow(TheRes))
+  {
+    h_j <- TheRes[j,match("h",colnames(TheRes))]
+    g_j <- TheRes[j,match("g",colnames(TheRes))]
+    Tmat_j <- TheRes[j,match("Tmat",colnames(TheRes))]
+    t1_j <- TheRes[j,match("t1",colnames(TheRes))]
+    cv_j <- TheRes[j,match("size.cv",colnames(TheRes))]
+    
+    linf <- 3*h_j/g_j # conversion for the VBGF L-infinity
+    vbk <- log(1+g_j/3) # conversion for the VBGF parameter kappa
+    t0 <- Tmat_j + log(1-g_j*(Tmat_j-t1_j)/3)/log(1+g_j/3) #conversion for the VBGF parameter t0
+    
+    
+    juv_j <- h_j*(ages-t1_j)
+    adult_j <- linf*(1-exp(-vbk*(ages-t0)))
+    pred_j <- ifelse(ages<=Tmat_j,juv_j,adult_j)
+    pred_j[pred_j<0.001] <- 0.001
+    post_pred[j,] <- rnorm(length(ages),pred_j,pred_j*cv_j)
+  }
+  quants <- t(apply(post_pred[,],2,FUN=quantile,probs=c(0.025,0.225,0.50,0.775,0.975)))
+  plot(age_vec,c(quants[,1],rev(quants[,5])),type="l",
+       lwd=2,col=NA,
+       ylab="",xlab="",ylim=c(0,1200))
+  axis(1,at=median(c(0,max(ages))),
+       paste("Age (yrs) for ","Starting Theta ",i,sep=""),tick=FALSE,line=0.90)
+  axis(2,at=600,"Size (mm)",tick=FALSE,line=1)
+  polygon(age_vec,c(quants[,1],rev(quants[,5])),col="grey50")
+  polygon(age_vec,c(quants[,2],rev(quants[,4])),col="grey95")
+  lines(ages,quants[,3],lwd=2,col="black")
+  points(Data$Age,Data$Size,pch=21,bg="white")
+}
+
+```
+
+The posterior predictive distribution covers most of the data, and we can see from graphical portrayal that there are no systematic discrepancies between the *observed* and *simulated* data. In general, we might conclude the model is valid and fits well to the data (one could conduct alternative Bayesian goodness-of-fit tests as well).
+
+## Comparing the three different approaches using percent bias
+
+First, we will store the approaches for percent bias calculations.
+
+```{r percentBias}
+m2.1 <- apply(approach2[[1]]$CI95,2,FUN=function(x){return(c(min(x),max(x)))}) ## find the 95% for approach 2 (profiling), start 1
+m2.2 <- apply(approach2[[2]]$CI95,2,FUN=function(x){return(c(min(x),max(x)))}) ## find the 95% for approach 2 (profiling), start 2
+m2.3 <- apply(approach2[[3]]$CI95,2,FUN=function(x){return(c(min(x),max(x)))}) ## find the 95% for approach 2 (profiling), start 3
+CI <- rbind(approach2[[1]]$best.est[-2],m2.1, # storing for best estimates and 95% CI for profiling approach
+            approach2[[2]]$best.est[-2],m2.2,
+            approach2[[3]]$best.est[-2],m2.3)
+bias2 <- apply(CI,1,function(x){(x-c(Tmat,h,-h*t1,g,cv))/c(Tmat,h,-h*t1,g,cv)*100}) # calculate percent bias for profiling approach
+m3.1 <- apply(approach3[[1]],2,FUN=quantile,probs=c(0.025,0.5,0.975)) ## find the 95% for approach 3, start 1
+m3.2 <- apply(approach3[[2]],2,FUN=quantile,probs=c(0.025,0.5,0.975)) ## find the 95% for approach 3, start 2
+m3.3 <- apply(approach3[[3]],2,FUN=quantile,probs=c(0.025,0.5,0.975)) ## find the 95% for approach 3, start 3
+bias3.1 <- apply(m3.1,1,function(x){(x-c(h,t1,g,Tmat,cv))/c(h,t1,g,Tmat,cv)*100}) ## calculate percent bias for Bayesian approach, starting point 1
+bias3.2 <- apply(m3.2,1,function(x){(x-c(h,t1,g,Tmat,cv))/c(h,t1,g,Tmat,cv)*100}) ## calculate percent bias for Bayesian approach, starting point 2
+bias3.3 <- apply(m3.3,1,function(x){(x-c(h,t1,g,Tmat,cv))/c(h,t1,g,Tmat,cv)*100}) ## calculate percent bias for Bayesian approach, starting point 3
+
+```
+
+Then we make plots for showing the bias for each parameter, each starting vector, and each approach.
+
+```{r biasPlots}
+#layout(matrix(1:6,nrow=3,ncol=2,byrow=T))
+layout(matrix(1,nrow=1,ncol=1,byrow=T))
+par(mar=c(4,4,1,8))
+
+plot(ages,surv,ylab="Relative frequency",xlab="Age",type="l",lty=2,col="blue",lwd=2)
+lines(ages,select,lty=2,col="orangered",lwd=2)
+lines(ages,surv*select,lty=1,lwd=2)
+legend("right",c("Survivorship","Selectivity","Observed age-structure"),
+       lty=c(2,2,1),col=c("blue","orangered","black"),lwd=3,bty='n')
+Corner_text("a","topleft")
+
+plot(Data$Age,Data$Size, ylab="Length (mm)",xlab="Age (yrs)") ## plot length-at-age
+lines(ages,biphasic,lty=1,col="black",lwd=2)
+Corner_text("b","topleft")
+ylimits <- range(c(approach1[[1]]$bias,approach1[[2]]$bias,approach1[[3]]$bias),na.rm=T)
+plot(1:15,c(approach1[[1]]$bias[1,1],approach1[[2]]$bias[1,1],approach1[[3]]$bias[1,1],
+            approach1[[1]]$bias[1,2],approach1[[2]]$bias[1,2],approach1[[3]]$bias[1,2],
+            approach1[[1]]$bias[1,3],approach1[[2]]$bias[1,3],approach1[[3]]$bias[1,3],
+            approach1[[1]]$bias[1,5],approach1[[2]]$bias[1,5],approach1[[3]]$bias[1,5],
+            approach1[[1]]$bias[1,4],approach1[[2]]$bias[1,4],approach1[[3]]$bias[1,4]),
+     ylab="Percent bias",xlab="",xaxt='n',ylim=ylimits,pch=21,bg=c(1,1,1,2,2,2,3,3,3,4,4,4,5,5,5)) # this is the bias at the maximum likelihood estimates for approach 1
+segments(x0=1:15,x1=1:15,
+         y0=c(approach1[[1]]$bias[2,1],approach1[[2]]$bias[2,1],approach1[[3]]$bias[2,1],
+              approach1[[1]]$bias[2,2],approach1[[2]]$bias[2,2],approach1[[3]]$bias[2,2],
+              approach1[[1]]$bias[2,3],approach1[[2]]$bias[2,3],approach1[[3]]$bias[2,3],
+              approach1[[1]]$bias[2,5],approach1[[2]]$bias[2,5],approach1[[3]]$bias[2,5],
+              approach1[[1]]$bias[2,4],approach1[[2]]$bias[2,4],approach1[[3]]$bias[2,4]),
+         y1=c(approach1[[1]]$bias[3,1],approach1[[2]]$bias[3,1],approach1[[3]]$bias[3,1],
+              approach1[[1]]$bias[3,2],approach1[[2]]$bias[3,2],approach1[[3]]$bias[3,2],
+              approach1[[1]]$bias[3,3],approach1[[2]]$bias[3,3],approach1[[3]]$bias[3,3],
+              approach1[[1]]$bias[3,5],approach1[[2]]$bias[3,5],approach1[[3]]$bias[3,5],
+              approach1[[1]]$bias[3,4],approach1[[2]]$bias[3,4],approach1[[3]]$bias[3,4]),lty=2) # this is the bias at the 95% CI from Hessian matrix from approach 1
+abline(h=0,lty=2,col="red")
+axis(1,at=c(2,5,8,11,14),expression(italic(h),italic(t1),italic(g),italic(T),italic(cv)),line=1.5,tick=F)
+axis(1,at=1:15,rep(c("S1","S2","S3"),5),line=0,cex.axis=0.8)
+Corner_text("c","topleft")
+
+plot(1:15,c(bias2[2,c(1,4,7)],
+            bias2[3,c(1,4,7)],
+            bias2[4,c(1,4,7)],
+            bias2[1,c(1,4,7)],
+            bias2[5,c(1,4,7)]),pch=21,bg=c(1,1,1,2,2,2,3,3,3,4,4,4,5,5,5),
+     ylab="Percent bias",xlab="",xaxt='n',ylim=ylimits) # this is the bias at the maximum likelihood estimates for profiling approach
+segments(x0=1:15,x1=1:15,
+         y0=c(bias2[2,c(2,5,8)],
+              bias2[3,c(2,5,8)],
+              bias2[4,c(2,5,8)],
+              bias2[1,c(2,5,8)],
+              bias2[5,c(2,5,8)]),
+         y1=c(bias2[2,c(3,6,9)],
+              bias2[3,c(3,6,9)],
+              bias2[4,c(3,6,9)],
+              bias2[1,c(3,6,9)],
+              bias2[5,c(3,6,9)]),lty=2) # segments draws the bias for the 95% CI from profiling approach
+abline(h=0,lty=2,col="red")
+axis(1,at=c(2,5,8,11,14),expression(italic(h),italic(t1),italic(g),italic(T),italic(cv)),line=1.5,tick=F)
+axis(1,at=1:15,rep(c("S1","S2","S3"),5),line=0,cex.axis=0.8)
+Corner_text("d","topleft")
+
+plot(1:15,c(bias3.1[1,2],bias3.2[1,2],bias3.3[1,2],
+            bias3.1[2,2],bias3.2[2,2],bias3.3[2,2],
+            bias3.1[3,2],bias3.2[3,2],bias3.3[3,2],
+            bias3.1[4,2],bias3.2[4,2],bias3.3[4,2],
+            bias3.1[5,2],bias3.2[5,2],bias3.3[5,2]),
+            pch=21,bg=c(1,1,1,2,2,2,3,3,3,4,4,4,5,5,5),
+            ylab="Percent bias",xlab="",xaxt='n',ylim=ylimits) # this is the bias at the mean posterior for Bayesian approach
+segments(x0=1:15,x1=1:15,
+         y0=c(bias3.1[1,1],bias3.2[1,1],bias3.3[1,1],
+              bias3.1[2,1],bias3.2[2,1],bias3.3[2,1],
+              bias3.1[3,1],bias3.2[3,1],bias3.3[3,1],
+              bias3.1[4,1],bias3.2[4,1],bias3.3[4,1],
+              bias3.1[5,1],bias3.2[5,1],bias3.3[5,1]),
+         y1=c(bias3.1[1,3],bias3.2[1,3],bias3.3[1,3],
+              bias3.1[2,3],bias3.2[2,3],bias3.3[2,3],
+              bias3.1[3,3],bias3.2[3,3],bias3.3[3,3],
+              bias3.1[4,3],bias3.2[4,3],bias3.3[4,3],
+              bias3.1[5,3],bias3.2[5,3],bias3.3[5,3]),lty=2) # this is the bias at the 95% CI posterior for Bayesian approach
+abline(h=0,lty=2,col="red")
+axis(1,at=c(2,5,8,11,14),expression(italic(h),italic(t1),italic(g),italic(T),italic(cv)),line=1.5,tick=F)
+
+axis(1,at=1:15,rep(c("S1","S2","S3"),5),line=0,cex.axis=0.8)
+Corner_text("e","topleft")
+plot(Size~Age,data=Data,pch=21,bg="white",ylab="Length (mm)",xlab="Age (yrs)") # draw the growth trajectories for each of the 3 approaches at starting vector 2 (i.e., theta2)
+lines(ages,biphasicPlot(h=approach1[[3]]$mn.95[1,1],
+                    g=approach1[[3]]$mn.95[1,3],
+                    t1=approach1[[3]]$mn.95[1,2],
+                    Tmat=approach1[[3]]$mn.95[1,5]),lty=2,lwd=2,col="green")
+lines(ages,biphasicPlot(h=as.numeric(approach2[[3]]$best.est[3]),
+                    g=as.numeric(approach2[[3]]$best.est[5]),
+                    t1=as.numeric(-approach2[[3]]$best.est[4]/approach2[[3]]$best.est[3]),
+                    Tmat=as.numeric(approach2[[3]]$best.est[1])),lty=2,lwd=2,col="blue")
+lines(ages,biphasicPlot(h=mean(TheResTot[,"h"]),
+                    g=mean(TheResTot[,"g"]),
+                    t1=mean(TheResTot[,"t1"]),
+                    Tmat=mean(TheResTot[,"Tmat"])),lty=2,lwd=2,col="orange")
+lines(ages,biphasic,lty=1,lwd=2,col="black")
+legend("bottomright",c("True growth","Observed size-age","Penalized like.","Like. profile","Bayesian MCMC"),lty=c(1,NA,2,2,2),lwd=c(2,1,2,2,2),col=c(1,1,"green","blue","orange"),pch=c(NA,21,NA,NA,NA),pt.bg=c(NA,"white",NA,NA,NA),bty='n',xpd=NA)
+Corner_text("f","topleft")
+```
+
+Overall, we can see that the parameters are estimated fairly well for all three approaches. For this one simulation run, we can see that MCMC (panel e) and profiling (panel d) did particularly well, while the penalized likelihood (panel c) had less precision on $t_1$ and $g$ compared to the other two approaches. Different starting values can lead to less accurate or precise estimates of the life-history parameters. A more robust simulation that repeats this simulation several times is available in Appendix G.
+
+## References
+```{r references, echo=FALSE, message=FALSE}
+write.bibtex(file="Appendix_F_references.bib")
+```
