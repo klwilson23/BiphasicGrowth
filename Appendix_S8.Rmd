@@ -1,7 +1,7 @@
 ---
 title: |
-  | Appendix I:
-  | Estimating biphasic growth for multiple populations with an environmental trend using MCMC
+  | Appendix S8:
+  | Estimating biphasic growth for multiple populations using MCMC
 author: |
   | Kyle L. Wilson
   | The University of Calgary
@@ -10,7 +10,7 @@ output:
   html_document:
     pandoc_args:
     - --biblio
-    - Appendix_I_references.bib
+    - Appendix_S8_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
   fig_caption: yes
@@ -22,7 +22,7 @@ output:
   pdf_document:
     pandoc_args:
     - --biblio
-    - Appendix_I_references.bib
+    - Appendix_S8_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
 references:
@@ -75,25 +75,6 @@ references:
   title-short: BDA3
   type: book
   volume: null
-- DOI: null
-  URL: null
-  author:
-  - family: Royle
-    given: J. A.
-  - family: Dorazio
-    given: R. M.
-  id: Royle2008
-  issue: null
-  issued: 2008
-  language: en-GB
-  location: New York
-  page: null
-  publisher: Academic Press
-  title: 'Hierarchical modeling and inference in ecology: the analysis of data from
-    populations, metapopulations and communities'
-  title-short: Hierarchical modeling in ecology
-  type: book
-  volume: null
 ---
 
 ```{r setup, include=FALSE}
@@ -113,13 +94,11 @@ options("citation_format" = "pandoc")
 This appendix is in support of @WilsonInReview. The citation style language (csl) used herein is the methods-in-ecology-and-evolution.csl file which can be downloaded from https://github.com/citation-style-language/styles/blob/master/methods-in-ecology-and-evolution.csl and placed in the same directory as this .rmd file.
 
 
-The following is an example application of the Lester biphasic model `r citep("10.1098/rspb.2004.2778")` where the breakpoint $T$ (age-at-maturity) is treated as unknown prior to model estimation. There is an environmental trend on growth (e.g., `r citet("10.1016/j.ecolmodel.2004.02.013")`). Hence, this serves as an example of how to estimate an environmental determinant on a life history trait of interest, while accounting for uncertainty in both the trait itself and the relationship with its environment.
+The following is an example application of the Lester biphasic model `r citep("10.1098/rspb.2004.2778")` where the breakpoint $T$ (age-at-maturity) is treated as unknown prior to model estimation. Specifically, we simulate multiple populations, and the life history of each population is related to that of other populations in a hierarchical manner (i.e., each life history parameter is random arising from a global distribution for that life history parameter). Known growth parameters are used to simulate the random, population-specific parameters. We generate size-at-age data given a population-specific, constant coefficient of variation in size-at-age. 
 
-Specifically, we simulate multiple populations, and the life history of each population is related to that of other populations in a hierarchical manner (i.e., each life history parameter is random arising from a global distribution for that life history parameter). Known growth parameters are used to simulate the random, population-specific parameters. We also simulate an environmental trend on the parameter $h$ (juvenile growth rate) whereby growth increases across a gradient (labeled `enviro` in the code below). We generate size-at-age data given a population-specific, constant coefficient of variation in size-at-age. 
+We then fit the Lester biphasic model to these simulated data using a hierarchical framework in the Bayesian MCMC software JAGS. This framework allows us to estimate population-specific and 'global' (i.e., average across populations) growth parameters. We build the hierarchical model with vague priors (or hyperpriors), and we run JAGS from the R console using the `runjags` package and `run.jags()` function. JAGS  must be installed independently prior to running this code (see 'http://mcmc-jags.sourceforge.net/'). All variables are treated as unknown at both the population and 'global' levels. 
 
-We then fit the Lester biphasic model to these simulated data using a hierarchical framework in the Bayesian MCMC software JAGS. This framework allows us to estimate population-specific and 'global' (i.e., average across populations) growth parameters, as well as the slope of the environmental effect on $h$ among populations. We build the hierarchical model with vague priors (or hyperpriors), and we run JAGS from the R console using the `runjags` package and `run.jags()` function. JAGS  must be installed independently prior to running this code (see 'http://mcmc-jags.sourceforge.net/'). All variables are treated as unknown at both the population and 'global' levels. 
-
-Our results summarize variables by their marginal posterior distribution. We then compare the central tendency of each parameter's posterior distribution to determine how well we recover the simulated 'true' parameters at the population and global levels. Lastly, we evaluate our ability to detect the environmental trend in $h$.
+Our results summarize variables by their marginal posterior distribution. We then compare the central tendency of each parameter's posterior distribution to determine how well we recover the simulated 'true' parameters at the population and global levels.
 
 ## Global functions
 
@@ -197,10 +176,6 @@ cv <- 0.15 # coefficient of variation in size-at-age
 sizeCV <- 0.000000001 # what is the variation in the CV parameter across populations?
 #i.e., are some populations more variable in size-at-age than others?
 
-beta1 <- 0.15 # define the slope between growth rate and environment
-enviro <- seq(from=0,to=100,length=nPop) # define the value for the environmental gradient
-std.enviro <- (enviro-mean(enviro)) # center the gradient on the mean
-
 linf <- 3*h/g # convert to VBGF L-infinity
 vbk <- log(1+g/3) # convert to VBGF kappa
 t0 <- Tmat + log(1-g*(Tmat-t1)/3)/log(1+g/3) #convert to VBGF t0
@@ -217,22 +192,19 @@ abline(v=Tmat,col='red',lty=2) #plot where maturity occurs
 
 ```
 
-Next, we generate the population-specific life history parameters, which arise as a random variable from that parameter's distribution. We set the random number generator to 100 so that our results are repeatable: `set.seed(100)`. Note that the population-specific juvenile growth rate $h$ will increase as the environmental gradient increases with a slope of $\beta$, but there is still noise in the relationship:
+Next, we generate the population-specific life history parameters, which arise as a random variable from that parameter's distribution. For instance, for $h$:
+
 
 $$h_i \sim N(\mu, \sigma)$$
-with  mean $\mu$ and variance $\sigma$ of this distribution defined as  
+with  mean $\mu$ and variance $\sigma$ of this distribution:  
 
-$$\mu = h+\beta*x_i$$
-and
-
-$$\sigma = h*cv_\text{h}$$.
-
+$$\mu = h$$
+$$\sigma = h*cv_\text{h}$$
+We set the random number generator to 100 so that our results are repeatable: `set.seed(100)`.
 
 ```{r generate Hierarchy, message=FALSE}
 set.seed(100)
-h_i <- rnorm(nPop,(h+beta1*std.enviro),h*h_cv) # growth rate, h, for population i is random arising from a normal distribution with mean h and standard deviation of h*h_cv
-plot(enviro, h_i, xlab="Environmental covariate",ylab="Juvenile somatic growth rate (mm/yr)")
-lines(enviro,(h+beta1*std.enviro),lty=2,lwd=2,col="grey50")
+h_i <- rnorm(nPop,h,h*h_cv) # growth rate, h, for population i is random arising from a normal distribution with mean h and standard deviation of h*h_cv
 Tmat_i <- rnorm(nPop,Tmat,Tmat*Tmat_cv)
 t1_i <- rnorm(nPop,t1,abs(t1*t1_cv))
 g_i <- rbeta(nPop,get_beta(g,g_cv)$alpha,get_beta(g,g_cv)$beta) # grab the shape parameters of a beta distribution based on its mean and variance
@@ -323,7 +295,7 @@ for(i in 1:Nfish) {
 for(j in 1:Npop) {
   # normal priors for population j
   T50_pop[j] ~ dnorm(T50,tau.T50)T(0,)
-  h_pop[j] ~ dnorm(h+wb*beta1*enviro[j],tau.h)T(0,)
+  h_pop[j] ~ dnorm(h,tau.h)T(0,)
   t1_pop[j] ~ dnorm(t1, tau.t1)
 
   # Beta distribution for the reproductive investment
@@ -340,8 +312,6 @@ T50 ~ dnorm(10,1e-7)T(0,)
 h ~ dnorm(40,1e-7)T(0,)
 t1 ~ dnorm(0,1e-2)
 g ~ dgamma(0.001,0.001)T(,3/(T50-t1))
-beta1 ~ dnorm(0,1e-3)
-wb ~ dbern(0.5)
 
 # below are the half-t priors on variance parameters
 
@@ -373,8 +343,7 @@ data <- list(Nfish=length(dataPop$Age),
              Npop=length(unique(dataPop$Pop_Num)),
              age=dataPop$Age,
              size=dataPop$Size,
-             Pop=dataPop$Pop_Num,
-             enviro=std.enviro)
+             Pop=dataPop$Pop_Num)
 # the above list compiles the noisy data from the dataPop dataframe
 # into 3 vectors for age, size, and Pop (numerically, which population does each row correspond to?)
 
@@ -391,8 +360,6 @@ inits1 <- list(h=h,
               t1_cv=t1_cv,
               g_cv=g_cv,
               T50_cv=Tmat_cv,
-              beta1=0,
-              wb=0.5,
               .RNG.name="base::Wichmann-Hill", .RNG.seed=735)
 
 # initial estimates of each parameter must be provided. RNG is random number generators for that chain
@@ -412,10 +379,9 @@ mon_names <- c(names(inits3)[-c(length(inits3),length(inits3)-1)]) # create the 
 
 Our next step is to set how many posterior samples we want, the length of the burn-in period and adaptation period, and the thinning rate. Our thinning rate is a somewhat high value of 10-30 - although this slows us down, the expected large correlations between parameters and the Markovian sampling process can lead to high autocorrelation among the consecutive posterior samples. To gain more independent samples, we run each chain longer by increasing our thinning rate while still only taking `Nsamp` number of samples.
 
-We then use the `run.jags()` function to call JAGS to run our model `r citep(citation("runjags"))`. We specify the modules we run, and some other parameters internal to `run.jags()`, like the `method` and `modules`. For example, the `glm` module helps us estimate the linear regression aspect to the relationship between $h$ and the simulated environmental gradient. One can also use the `rjparallel` method to parallelize the MCMC estimation and speed up JAGS model run times.
+We then use the `run.jags()` function to call JAGS to run our model `r citep(citation("runjags"))`. We specify the modules we run, and some other parameters internal to `run.jags()`, like the `method` and `modules`. One can use the `rjparallel` method to parallelize the MCMC estimation and speed up JAGS model run times.
 
 The `summary(results)` command reports some quick MCMC diagnostic tests to assess whether the posterior has converged on a stable distribution. The potential scale reduction factor (also called the Gelman-Rubin test) and the effective number of sample sizes are all reported in this summary output. The library `coda` offers more options for MCMC diagnostics.
-
 ```{r runJAGS, message=FALSE}
 Nsamp <- 1000 # how many posterior samples does each chain need to get, after thinning and burin-in and adaptation?
 thin_rt <- 15 # place some sort of thinning rate?
@@ -432,20 +398,19 @@ b <- (proc.time() - a)
 print((b[3]/60)/60) # how long it took in hours
 print((b[3]/(4*(Nsamp*thin_rt+burnins+adaptin)))) # how long it took in seconds per iteration
 sum_results <- summary(results)
-print(sum_results[,c(1,2,3,4,8,9,10)])
+print(sum_results[,c(1,2,3,8,9,10)])
 res.corr <- extract.runjags(add.summary(results),"crosscorr") # extract the cross-correlation matrix
 ```
-
 
 ## Store the model results
 
 
-Next, we store the results as an `mcmc.list` which could be used in `coda` for MCMC diagnostics `r citep(citation("coda"))` (see Appendix E), but here we just quickly coerce this into a `matrix` object for our purposes. We then use some `grep` functions to quickly grab the posterior distributions of monitored parameters associated with specific growth model parameters (e.g., $h$, $h_i$, and $cv_\text{h}$.
+Next, we store the results as an `mcmc.list` which could be used in `coda` for MCMC diagnostics `r citep(citation("coda"))` (see Appendix S5), but here we just quickly coerce this into a `matrix` object for our purposes. We then use some `grep` functions to quickly grab the posterior distributions of monitored parameters associated with specific growth model parameters (e.g., $h$, $h_i$, and $cv_\text{h}$.
 
 We can do some further diagnostics of the model by evaluating how biased the estimates of the growth parameters were in comparison to the simulated 'true' parameter values. To do this, we will use percent bias: $$Bias = ((\theta_i - \hat{\theta_i})/\theta_i) * 100$$  
 where $\theta_i$ is a life history parameter of interest, e.g., juvenile growth rate $h_i$.
 
-```{r DataStorage}
+```{r DataStorage,message=FALSE}
 TheRes <- as.mcmc.list(results, vars=mon_names)
 TheRes <- as.matrix(TheRes)
 
@@ -477,7 +442,7 @@ for(i in 1:ncol(var_plot))
 
 ## Percent bias and correlation plots
 
-The code below generates a plot showing percent bias for each of the estimated parameters, along with some example correlations between the parameters $T_i$ and $h_i$
+The code below generates a plot showing percent bias for each of the estimated parameters, along with some example correlations between the parameters $T_i$ and $h_i$.
 
 ```{r PlotBias}
 par(mfrow=c(1,1))
@@ -532,7 +497,7 @@ Corner_text("f.","topleft")
 
 Next, we will run posterior predictive checks, which use the posterior distribution of the parameter estimates to re-generate a randomized posterior distribution of data, assuming the data arose according to the truncated normal distribution (as specified in the model above). We then overlay our observed data atop this distribution to check if there is any systematic bias (@Gelman2013).
 
-```{r PosteriorPredictives}
+```{r PosteriorPredictives, message=FALSE}
 
 age_vec <- c(ages,rev(ages))
 post_pred <- array(NA, dim=c(nrow(TheRes),length(ages),nPop)) 
@@ -555,7 +520,6 @@ for(i in 1:nPop)
     vbk <- log(1+g_j/3) # conversion for the VBGF parameter kappa
     t0 <- T50_j + log(1-g_j*(T50_j-t1_j)/3)/log(1+g_j/3) #conversion for the VBGF parameter t0
     
-    
     juv_j <- h_j*(ages-t1_j)
     adult_j <- linf*(1-exp(-vbk*(ages-t0)))
     pred_j <- ifelse(ages<T50_j,juv_j,adult_j)
@@ -577,41 +541,9 @@ for(i in 1:nPop)
 
 ```
 
-## Trait-environment relationship
-
-Finally, we will plot the environmental trend on $h$. In our model, we used an inclusion parameter $\omega$ (@Royle2008) which told the MCMC algorithm to sample $\beta$ only when there was information in the posterior such that the Bernoulli trial on $\omega$ was equal to 1. Hence, we must remove all $\beta$ when $\omega$ equals 0 for our inference on the distribution of the slope term.
-
-```{r EnvironmentalTrend}
-layout(matrix(1,nrow=1,ncol=1))
-par(mar=c(5,4,1,1))
-beta.hat <- sapply(TheRes[,"beta1"],FUN=function(x){x*std.enviro})
-predRes <- beta.hat+TheRes[,"h"]
-predRes <- predRes[,TheRes[,"wb"]!=0]
-newEnviro <- seq(from=min(enviro),to=max(enviro),length=2)
-newStdEnviro <- newEnviro-mean(newEnviro)
-beta.hat <- sapply(TheRes[,"beta1"],FUN=function(x){x*newStdEnviro})
-predRes <- beta.hat+TheRes[,"h"]
-predRes <- predRes[,TheRes[,"wb"]!=0]
-betaQuants <- t(apply(predRes,1,FUN=quantile,probs=c(0.025,0.225,0.50,0.775,0.975)))
-enviroRev <- c(newEnviro,rev(newEnviro))
-
-plot(newEnviro,betaQuants[,3],type='l',ylim=range(betaQuants),xlab="Environment",ylab="Predictions in growth rate (mm\u00B7yr-1)")
-polygon(enviroRev,c(betaQuants[,1],rev(betaQuants[,5])),col="grey50")
-polygon(enviroRev,c(betaQuants[,2],rev(betaQuants[,4])),col="grey95")
-lines(newEnviro,betaQuants[,3],lty=1,lwd=2)
-lines(newEnviro,beta1*newStdEnviro+h,lty=2,col=2,lwd=2)
-
-boxplot(t(TheRes[,grep("h_pop",colnames(TheRes))])~enviro,xaxt="n",xlab="Environmental gradient",ylab=expression(paste("Growth rate (mm\u00B7yr"^"-1",")")),outline=F,col="grey80")
-axis(1,at=1:10,round(enviro))
-lines(1:nPop,beta1*std.enviro+h,lty=1,col="darkorange",lwd=2)
-lines(c(1,nPop),betaQuants[,3],lty=2,lwd=2,col="black")
-points(1:nPop,h_i,pch=21,bg="darkorange")
-legend("bottomright",bty="n",lty=c(NA,NA,1,2),pch=c(21,22,NA,NA),pt.bg=c("darkorange","grey95",NA,NA),lwd=c(NA,NA,2,2),c("True growth","Estimated growth","True slope","Estimated slope"),col=c(1,1,"darkorange","black"))
-
-```
 
 ## References
 ```{r references, echo=FALSE, message=FALSE}
-write.bibtex(file="Appendix_I_references.bib")
+write.bibtex(file="Appendix_S8_references.bib")
 ```
 

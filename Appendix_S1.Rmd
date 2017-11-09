@@ -1,6 +1,6 @@
 ---
 title: |
-  | Appendix A:
+  | Appendix S1:
   | Biphasic somatic growth fit in two steps
 author: |
   | Brian Moe$^1$ and Kyle Wilson$^2$
@@ -10,13 +10,13 @@ output:
   html_document:
     pandoc_args:
     - --biblio
-    - Appendix_A_references.bib
+    - Appendix_S1_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
   pdf_document:
     pandoc_args:
     - --biblio
-    - Appendix_A_references.bib
+    - Appendix_S1_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
 references:
@@ -232,5 +232,5 @@ abline(v=0,lwd=3,col="red")
 
 ## References
 ```{r references, echo=FALSE, message=FALSE}
-write.bibtex(file="Appendix_A_references.bib")
+write.bibtex(file="Appendix_S1_references.bib")
 ```

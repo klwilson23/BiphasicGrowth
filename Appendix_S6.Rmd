@@ -1,6 +1,6 @@
 ---
 title: |
-  | Appendix F:
+  | Appendix S6:
   | Realistic simulation and comparison of three approaches to fitting biphasic growth models
 author: |
   | Kyle L Wilson
@@ -10,7 +10,7 @@ output:
   html_document:
     pandoc_args:
     - --biblio
-    - Appendix_F_references.bib
+    - Appendix_S6_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
   fig_caption: yes
@@ -22,7 +22,7 @@ output:
   pdf_document:
     pandoc_args:
     - --biblio
-    - Appendix_F_references.bib
+    - Appendix_S6_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
 references:
@@ -206,7 +206,7 @@ lines(ages,biphasic,lty=2,col="blue")
 
 ## Approach 1 - Penalized likelihood
 
-The next step is to duplicate what we did in Appendix C, where we specify the likelihood function. We estimate five parameters: $T$, $h$, $t_1$, $g$, and the $cv$ in length-at-age. We provide conversions for the von Bertalanffy (mature) growth parameters, and we use an if-else statement to differentiate between immature and mature growth. Finally, we use a penalized likelihood to help ensure that estimates of $g$ do not venture outside of analytical bounds (see @Lester_2004).
+The next step is to duplicate what we did in Appendix S3, where we specify the likelihood function. We estimate five parameters: $T$, $h$, $t_1$, $g$, and the $cv$ in length-at-age. We provide conversions for the von Bertalanffy (mature) growth parameters, and we use an if-else statement to differentiate between immature and mature growth. Finally, we use a penalized likelihood to help ensure that estimates of $g$ do not venture outside of analytical bounds (see @Lester_2004).
 
 ```{r LikelihoodFunction}
 nll <- function(theta)
@@ -291,7 +291,7 @@ approach1 <- list(m1,m2,m3) #Store the results of approach 1 for plotting later
 
 ## Approach 2 - Likelihood profiling
 
-In this case, we will use the profile likelihood approach (`r citep("10.1002/eap.1421")`) See Appendix D for details.
+In this case, we will use the profile likelihood approach (`r citep("10.1002/eap.1421")`) See Appendix S4 for details.
 
 ```{r ProfilingFunction, warning=F, message=FALSE}
 Biphas.Lik.MA = function(parms) { 
@@ -513,7 +513,7 @@ b <- (proc.time() - a)
 
 Next, we will call the summary of the model fit. We can also show some diagnostic plots that evaluate whether the posterior has converged on a stable mode using the package  `coda()` `r citep(citation("coda"))`.
 
-We then show a percent bias plot that suggests that parameters for this one randomized dataset were estimated well, apart from $t_1$ (which was estimated with noise). We could repeat this trial many times to get a general idea of how well the model recovers true life-history parameters of interest (we do this in Appendix G).
+We then show a percent bias plot that suggests that parameters for this one randomized dataset were estimated well, apart from $t_1$ (which was estimated with noise). We could repeat this trial many times to get a general idea of how well the model recovers true life-history parameters of interest (we do this in Appendix S7).
 
 We next show a pairs plot to see how correlated the parameters are during the MCMC estimation. One may wish to use a multivariate normal distribution in the JAGS model above to allow for the correlations to be incorporated into the MCMC sampling `r citep("10.1016/j.ecolmodel.2004.02.013")`.
 
@@ -708,13 +708,13 @@ lines(ages,biphasicPlot(h=mean(TheResTot[,"h"]),
                     t1=mean(TheResTot[,"t1"]),
                     Tmat=mean(TheResTot[,"Tmat"])),lty=2,lwd=2,col="orange")
 lines(ages,biphasic,lty=1,lwd=2,col="black")
-legend("bottomright",c("True growth","Observed size-age","Penalized like.","Like. profile","Bayesian MCMC"),lty=c(1,NA,2,2,2),lwd=c(2,1,2,2,2),col=c(1,1,"green","blue","orange"),pch=c(NA,21,NA,NA,NA),pt.bg=c(NA,"white",NA,NA,NA),bty='n',xpd=NA)
+legend("bottomright",c("True growth","Observed size-at-age","Penalized like.","Like. profile","Bayesian MCMC"),lty=c(1,NA,2,2,2),lwd=c(2,1,2,2,2),col=c(1,1,"green","blue","orange"),pch=c(NA,21,NA,NA,NA),pt.bg=c(NA,"white",NA,NA,NA),bty='n',xpd=NA)
 Corner_text("f","topleft")
 ```
 
-Overall, we can see that the parameters are estimated fairly well for all three approaches. For this one simulation run, we can see that MCMC (panel e) and profiling (panel d) did particularly well, while the penalized likelihood (panel c) had less precision on $t_1$ and $g$ compared to the other two approaches. Different starting values can lead to less accurate or precise estimates of the life-history parameters. A more robust simulation that repeats this simulation several times is available in Appendix G.
+Overall, we can see that the parameters are estimated fairly well for all three approaches. For this one simulation run, we can see that MCMC (panel e) and profiling (panel d) did particularly well, while the penalized likelihood (panel c) had less precision on $t_1$ and $g$ compared to the other two approaches. Different starting values can lead to less accurate or precise estimates of the life-history parameters. A more robust simulation that repeats this simulation several times is available in Appendix S7.
 
 ## References
 ```{r references, echo=FALSE, message=FALSE}
-write.bibtex(file="Appendix_F_references.bib")
+write.bibtex(file="Appendix_S6_references.bib")
 ```

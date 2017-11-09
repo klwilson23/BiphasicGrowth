@@ -1,6 +1,6 @@
 ---
 title: |
-  | Appendix C:
+  | Appendix S3:
   | Fitting the Lester biphasic growth model without maturity data using a penalized likelihood approach
 author: |
   | Kyle Wilson$^1$ and Andrew Honsey$^2$
@@ -11,13 +11,13 @@ output:
   html_document:
     pandoc_args:
     - --biblio
-    - Appendix_C_references.bib
+    - Appendix_S3_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
   pdf_document:
     pandoc_args:
     - --biblio
-    - Appendix_C_references.bib
+    - Appendix_S3_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
 fig_height: 6
@@ -244,5 +244,5 @@ The top panel shows the percent bias for the five estimated parameters, compared
 
 ## References
 ```{r references, echo=FALSE, message=FALSE}
-write.bibtex(file="Appendix_C_references.bib")
+write.bibtex(file="Appendix_S3_references.bib")
 ```

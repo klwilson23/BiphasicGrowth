@@ -1,6 +1,6 @@
 ---
 title: |
-  | Appendix G:
+  | Appendix S7:
   | Bootstrapping three approaches to fitting biphasic growth models
 author: |
   | Kyle L. Wilson
@@ -10,7 +10,7 @@ output:
   html_document:
     pandoc_args:
     - --biblio
-    - Appendix_G_references.bib
+    - Appendix_S7_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
   fig_caption: yes
@@ -22,7 +22,7 @@ output:
   pdf_document:
     pandoc_args:
     - --biblio
-    - Appendix_G_references.bib
+    - Appendix_S7_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
 references:
@@ -113,7 +113,7 @@ library(parallel)
 
 ## Global functions
 
-The global functions defined below are also used in Appendices A-H. For example, the `nll()` function is our penalized negative log-likelihood which we introduced in Appendix C. The profile likelihood approach is similar to that used in `r citep("10.1002/eap.1421")`.
+The global functions defined below are also used in Appendices S1-S9. For example, the `nll()` function is our penalized negative log-likelihood which we introduced in Appendix S3. The profile likelihood approach is similar to that used in `r citep("10.1002/eap.1421")`.
 
 ```{r used_Functions, message=FALSE}
 
@@ -266,7 +266,7 @@ generateData <- function(Tmat,h,t1,M,cv,gearSlope,ages,Nfish)
 
 ### Function for bootstrapping
 
-The function below, called `bootstrapping()`, can be repeatedly called to fit the Lester biphasic model to various datasets using the three different approaches described above. The function returns the RMSE and percent bias on parameters for each approach within each iteration of the bootstrapping procedure. Note that this function is simply an amalgamation of functions in Appendices C-F. This function consists of 3 stages: penalized likelihood, likelihood profiling, and Bayesian MCMC. Each stage has a number of steps that include initializing and then fitting the model. The final lines of code calculate RMSE and percent bias and store those values in list objects named `rmse` and `biasList`. We encourage users to follow the comments closely for more details regarding what each line of code is doing.
+The function below, called `bootstrapping()`, can be repeatedly called to fit the Lester biphasic model to various datasets using the three different approaches described above. The function returns the RMSE and percent bias on parameters for each approach within each iteration of the bootstrapping procedure. Note that this function is simply an amalgamation of functions in Appendices S3-S6. This function consists of 3 stages: penalized likelihood, likelihood profiling, and Bayesian MCMC. Each stage has a number of steps that include initializing and then fitting the model. The final lines of code calculate RMSE and percent bias and store those values in list objects named `rmse` and `biasList`. We encourage users to follow the comments closely for more details regarding what each line of code is doing.
 
 ```{r bootstrapFunction, warning=FALSE, message=FALSE, results = 'hide'}
 bootstrapping <- function(start.par)
@@ -471,7 +471,7 @@ bootstrapping <- function(start.par)
       post_pred[j,] <- rnorm(length(ages),pred_j,pred_j*cv_j)
     }
     pred1 <- biphasicPlot(h=app1[1],t1=app1[2],g=app1[3],Tmat=app1[5])
-    pred2 <- biphasicPlot(h=app2[1],t1=-app2[2]/app2[1],g=app2[3],Tmat=app2[5])
+    pred2 <- biphasicPlot(h=app2[1],t1=app2[2],g=app2[3],Tmat=app2[5])
     resids1 <- sqrt(mean((pred1[Data$Age]-Data$Size)^2)) # calculate root mean squared error for penalized likelihood approach
     resids2 <- sqrt(mean((pred2[Data$Age]-Data$Size)^2)) # calculate root mean squared error for likelihood profiling approach
     quants <- t(apply(post_pred,2,FUN=quantile,probs=c(0.025,0.225,0.50,0.775,0.975)))
@@ -606,12 +606,12 @@ par(mar=c(4,4,1,1))
 for(s in 1:Nscenario)
 {
   index <- grep(paste("M=",scenario[s,3],sep=""),dimnames(res)$Scenario)
-  for(t in 1:3)
+  for(t in 1:3) # loop across the 3 methodological approaches
   {
     if(t==1){
-      boxplot(res[,s,t,],at=xlimits[t,],xlim=c(0,10),names=naming[t,],ylim=range(res[,index,,],na.rm = T)*c(0.85,1.15),ylab="Root mean squared error",col=colours[t])
+      boxplot(res[,s,,t],at=xlimits[t,],xlim=c(0,10),names=naming[t,],ylim=range(res[,index,,],na.rm = T)*c(0.85,1.15),ylab="Root mean squared error",col=colours[t])
     }else{
-      boxplot(res[,s,t,],at=xlimits[t,],names=naming[t,],add=TRUE,col=colours[t])
+      boxplot(res[,s,,t],at=xlimits[t,],names=naming[t,],add=TRUE,col=colours[t])
     }
     mtext(side=1,at=c(2,5,8),dimnames(res)$Technique,line=2.25,cex=0.7)
     Corner_text(dimnames(res)$Scenario[s],location="topright")
@@ -620,7 +620,7 @@ for(s in 1:Nscenario)
 
 ```
 
-The RMSE results suggest that most of the approaches do well. Note the range of the y-axes decreases as $M$ increases, showing that increased mortality leads to reduced bias and increased precision. This is likely because the breakpoint at maturity is more easily distinguished as mortality increases (due to increased investment in reproduction; @Lester_2004). The *S2* starting vector was the most sensitive at high levels of mortality. As expected, RMSE increases as $cv_l$ increases.
+The RMSE results suggest that most of the approaches do well. Note the range of the y-axes decreases as $M$ increases, showing that increased mortality leads to reduced bias and increased precision. This is likely because the breakpoint at maturity is more easily distinguished as mortality increases (due to increased investment in reproduction; @Lester_2004). At low mortality and low variance, the penalized likelihood approach was sensitive to starting vectors. As expected, RMSE increases as $cv_l$ increases.
  
  <br>
 
@@ -662,5 +662,5 @@ We note, however, that there were `r (paste("y=",sum(y),sep=""))` failures out o
 
 ## References
 ```{r references, echo=FALSE, message=FALSE}
-write.bibtex(file="Appendix_G_references.bib")
+write.bibtex(file="Appendix_S7_references.bib")
 ```

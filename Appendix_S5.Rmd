@@ -1,6 +1,6 @@
 ---
 title: |
-   | Appendix E:
+   | Appendix S5:
    | Fitting the Lester biphasic growth model without maturity data using a Bayesian MCMC approach
 author: |
   | Kyle Wilson$^1$ and Andrew Honsey$^2$
@@ -11,13 +11,13 @@ output:
   html_document:
     pandoc_args:
     - --biblio
-    - Appendix_E_references.bib
+    - Appendix_S5_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
   pdf_document:
     pandoc_args:
     - --biblio
-    - Appendix_E_references.bib
+    - Appendix_S5_references.bib
     - --csl
     - methods-in-ecology-and-evolution.csl
 references:
@@ -142,7 +142,7 @@ rngList <- function(x,y){ #this function creates randomly 'jittered' starting va
 
 We simulate length-at-age data for a single population for the Lester growth model (@Lester_2004). The age range of the fishes is read in as a vector of integers. True somatic growth rate can be any positive number and represents the length (in mm) accumulated per year in the late-stage juvenile phase. The variable $t_1$ represents the hypothetical age at length 0 (i.e., the *x*-intercept for the juvenile phase). We use a reasonable value for the coefficient of variation in length-at-age ($cv$) of 15%, a typical observation among most fishes (see review in `r citet("10.1016/j.fishres.2016.01.006")`). The variable $T$ (or Tmat in the R code below) represents the age-at-maturity for the population. The parameter $g$ represents the proportion of energy in the adult phase allocated to reproduction per unit time (in this case, per year). Note that $g$ must be positive and has an intrinsic maximum such that: $$ g \sim \{0,3/(T-t_1)\}. $$
 
-In this case, we set the 'true' $g$ value at 70% of the intrinsic maximum. We also adjust sample sizes-at-age in an attempt to account for factors such as gear selectivity and natural mortality; however, we could simulate this using a multinomial process as well (see Appendix D).
+In this case, we set the 'true' $g$ value at 70% of the intrinsic maximum. We also adjust sample sizes-at-age in an attempt to account for factors such as gear selectivity and natural mortality; however, we could simulate this using a multinomial process as well (see Appendix S4).
 
 ```{r True parameters}
 nPop <- 1 # number of populations
@@ -304,7 +304,7 @@ plot(results)
 
 ```
 
-We then show a percent bias plot. Our results suggest that parameters for this one randomized dataset were estimated well, apart from the parameter $t_1$, which was estimated with noise. We could repeat this trial many times to get a general idea of how well the model recovers true life history parameters of interest (we do this in Appendix I).
+We then show a percent bias plot. Our results suggest that parameters for this one randomized dataset were estimated well, apart from the parameter $t_1$, which was estimated with noise. We could repeat this trial many times to get a general idea of how well the model recovers true life history parameters of interest (we do this in Appendix S7).
 
 ```{r Bias plot}
 par(mfrow=c(1,1))
@@ -372,7 +372,7 @@ The posterior predictive distribution covers most of the data, and we can see fr
 
 ## References
 ```{r references, echo=FALSE, message=FALSE}
-write.bibtex(file="Appendix_E_references.bib")
+write.bibtex(file="Appendix_S5_references.bib")
 ```
 
 
